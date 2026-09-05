@@ -1,0 +1,52 @@
+# 알림 하나를 실행하는 공용 절차.
+#
+# 알림 넷이 실행 방식은 같고 이름만 다르므로 여기에 모은다. 넷에 흩어 두면
+# 한 곳을 고칠 때 나머지 셋이 조용히 뒤처진다.
+#
+# 실패 알림은 파이썬이 보낸다. 예외 타입과 메시지를 담아야 하고(docs/DESIGN.md 4.5 절)
+# 인증키 마스킹도 거기서 되기 때문이다. 워크플로에서 따로 보내면 같은 실패가 두 번 온다.
+#
+# 준비 단계(체크아웃·설치)가 깨지면 알림이 아예 나가지 않는데, 그것은 GitHub Actions
+# 실패 메일과 「매일 오던 알림 1 이 안 옴」으로 드러난다 (docs/DESIGN.md 7.2 절).
+
+name: 알림 실행
+
+on:
+  workflow_call:
+    inputs:
+      alert:
+        description: 실행할 알림 이름
+        required: true
+        type: string
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    # 점검 줄이 실행 이력을 읽는 데 필요하다
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Poetry 설치
+        run: pipx install poetry
+
+      - name: 의존성 설치
+        run: poetry install --without dev
+
+      - name: 알림 실행
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: poetry run python -m notify ${{ inputs.alert }}
+

@@ -36,7 +36,29 @@ poetry run black .
 
 ## 알림 실행
 
-> 구현 후 채웁니다. 계획서의 각 Phase 가 끝날 때 해당 명령을 여기 추가합니다.
+**보내지 않고 문구만 확인합니다.** 표준출력으로 문구가 나오고 로그는 표준에러로 갈립니다.
+
+```bash
+poetry run python -m notify buffer_zone --dry-run
+poetry run python -m notify reverse_rank_kr --dry-run
+poetry run python -m notify reverse_rank_us --dry-run
+poetry run python -m notify usdkrw --dry-run
+```
+
+**실제로 보냅니다.** `--dry-run` 을 빼면 텔레그램으로 나갑니다.
+
+```bash
+poetry run python -m notify buffer_zone
+```
+
+> **역방향 알림은 신호가 멀면 아무것도 내지 않습니다.** 출력이 비어 있는 것이 정상이며,
+> 그때는 로그(표준에러)에 「신호가 여유 밖이라 보내지 않습니다」가 남습니다.
+
+> **휴장이면 조용히 끝납니다.** 이동평균과 미국 역방향은 한국 기준 어제가 미국 거래일이
+> 아니면 볼 새 종가가 없어 그대로 종료합니다.
+
+> `점검` 줄은 `GITHUB_REPOSITORY` 와 `GITHUB_TOKEN` 이 있어야 채워집니다. 로컬에서는
+> 보통 없으므로 **`조회 실패` 로 나오고, 본문은 그대로 나옵니다.**
 
 ---
 

@@ -1,0 +1,24 @@
+# reverse_rank_us 알림.
+#
+# 트리거는 workflow_dispatch 하나뿐이다. schedule 을 두지 않는다 —
+# 외부 스케줄러와 함께 발화해 같은 알림이 두 번 가고, 막으려면 중복 검사 로직이
+# 워크플로마다 붙는다 (docs/DESIGN.md 6.3 절).
+#
+# 정시 트리거는 cron-job.org 가 이 워크플로를 dispatch 해서 만든다.
+
+name: reverse_rank_us
+
+on:
+  workflow_dispatch:
+
+# 같은 알림이 겹쳐 도는 것을 막는다. 앞선 실행을 취소하지는 않는다
+concurrency:
+  group: reverse_rank_us
+  cancel-in-progress: false
+
+jobs:
+  run:
+    uses: ./.github/workflows/_run_alert.yml
+    with:
+      alert: reverse_rank_us
+    secrets: inherit

@@ -1,0 +1,452 @@
+"""알림을 실행하는 명령줄 진입점.
+
+알림마다 데이터를 따로 받는다. 캐시로 공유하면 알림 사이에 결합이 생기고 신선도 검증이
+따라오는데, 아끼는 것은 종가 한 개다.
+
+**판정 대상 날짜**는 알림마다 다르다.
+
+- 이동평균과 미국 역방향은 한국 아침에 돌므로 **직전 미국 거래일**의 종가를 본다.
+  한국 기준 어제가 미국 거래일이 아니면 새 종가가 없어 조용히 끝낸다.
+- 한국 역방향은 **그날 장중**에 돌므로 오늘이 한국 거래일이어야 한다.
+- 주간 알림은 요일로만 돌며 환율 기준일은 **받은 자료의 마지막 날**을 쓴다.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from collections.abc import Sequence
+from datetime import date, datetime, timedelta
+
+import pandas as pd
+from dotenv import dotenv_values
+
+from notify.alerts import buffer_zone, failure, usdkrw
+from notify.alerts.formatting import format_day
+from notify.alerts.health import (
+    LOOKUP_FAILED,
+    WORKFLOW_USDKRW,
+    HealthLine,
+    count_success_runs,
+    daily_health,
+    expected_runs,
+    weekly_health,
+)
+from notify.alerts.reverse_rank import Market, judge, signal_prices
+from notify.alerts.reverse_rank import render as render_reverse
+from notify.common_constants import (
+    BUFFER_ZONE_TICKERS,
+    ECOS_USDKRW_ITEM_CODE,
+    ECOS_USDKRW_STAT_CODE,
+    POSITIONS_PATH,
+    PROJECT_ROOT,
+    REVERSE_RANK_PATH,
+    TICKER_QQQ,
+    TZ_KST,
+    USDKRW_WINDOW_YEARS,
+)
+from notify.data.calendar import is_kr_trading_day, is_us_trading_day
+from notify.data.ecos_client import fetch_usdkrw, load_api_key
+from notify.data.yfinance_client import fetch_closes
+from notify.notifier import telegram
+from notify.state.positions import load_positions
+from notify.state.reverse_rank import RankEntry, load_reverse_rank
+from notify.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+ENV_FILE_PATH = PROJECT_ROOT / ".env"
+
+# 알림 이름
+ALERT_BUFFER_ZONE = "buffer_zone"
+ALERT_REVERSE_KR = "reverse_rank_kr"
+ALERT_REVERSE_US = "reverse_rank_us"
+ALERT_USDKRW = "usdkrw"
+ALERT_NAMES = (ALERT_BUFFER_ZONE, ALERT_REVERSE_KR, ALERT_REVERSE_US, ALERT_USDKRW)
+
+# state 파일이 쓰는 종목 열쇠
+RANK_KEY_KODEX = "kodex200"
+RANK_KEY_QQQ = "qqq"
+
+# 화면에 쓸 종목 이름
+SYMBOL_KODEX = "KODEX 200"
+
+# KODEX 200 의 야후 티커
+YF_TICKER_KODEX = "069500.KS"
+
+# 환율 조회 기간. 10년 창을 채우고 여유를 둔다
+USDKRW_LOOKBACK_DAYS = 365 * 11
+
+
+def _config(name: str, required: bool = True) -> str:
+    """설정값을 읽는다.
+
+    환경 변수를 먼저 보고 없으면 `.env` 를 본다. 워크플로는 환경 변수로 넘긴다.
+
+    Args:
+        name: 설정 이름.
+        required: 없을 때 예외를 낼지 여부.
+
+    Returns:
+        설정값. 없고 필수가 아니면 빈 문자열.
+
+    Raises:
+        ValueError: 필수인데 값이 없을 때.
+    """
+    value = os.environ.get(name) or dotenv_values(ENV_FILE_PATH).get(name) or ""
+    value = value.strip()
+    if required and not value:
+        raise ValueError(f"{name} 가 없습니다. `.env` 또는 워크플로 시크릿에 넣으세요.")
+    return value
+
+
+def _run_counter(repository: str, token: str):
+    """실행 이력을 세는 함수를 만든다.
+
+    Args:
+        repository: `소유자/저장소` 형태.
+        token: GitHub 토큰.
+
+    Returns:
+        워크플로와 날짜를 받아 성공 수를 돌려주는 함수.
+    """
+
+    def counter(workflow: str, day: date) -> int:
+        return count_success_runs(repository, token, workflow, day)
+
+    return counter
+
+
+def _health_counter():
+    """설정이 갖춰졌으면 실제 조회를, 아니면 0 을 돌려주는 함수를 만든다.
+
+    Returns:
+        실행 수를 세는 함수.
+    """
+    repository = _config("GITHUB_REPOSITORY", required=False)
+    token = _config("GITHUB_TOKEN", required=False)
+    if repository and token:
+        return _run_counter(repository, token)
+
+    def unavailable(workflow: str, day: date) -> int:
+        del workflow, day
+        raise ValueError("GITHUB_REPOSITORY 또는 GITHUB_TOKEN 이 없어 실행 이력을 조회할 수 없습니다.")
+
+    return unavailable
+
+
+def _load_rank(key: str) -> RankEntry:
+    """순위 등락률에서 한 종목을 꺼낸다.
+
+    Args:
+        key: 종목 열쇠.
+
+    Returns:
+        그 종목의 순위 등락률.
+
+    Raises:
+        ValueError: 파일에 그 종목이 없을 때.
+    """
+    entries = load_reverse_rank(REVERSE_RANK_PATH)
+    if key not in entries:
+        raise ValueError(f"순위 등락률 파일에 '{key}' 가 없습니다: {REVERSE_RANK_PATH}")
+    return entries[key]
+
+
+def run_buffer_zone(now: datetime) -> str | None:
+    """이동평균 알림 문구를 만든다.
+
+    Args:
+        now: 실행 시각.
+
+    Returns:
+        보낼 문구. 볼 종가가 없으면 None.
+    """
+    target = now.date() - timedelta(days=1)
+    if not is_us_trading_day(target):
+        logger.debug(f"{target} 은 미국 휴장이라 새 종가가 없습니다.")
+        return None
+
+    positions = load_positions(POSITIONS_PATH)
+    tickers = list(dict.fromkeys([*BUFFER_ZONE_TICKERS, *(p.ticker for p in positions)]))
+    closes = fetch_closes(tickers)
+
+    proximities = [
+        buffer_zone.ProximityLine(
+            ticker=ticker,
+            proximity_rate=buffer_zone.ma_proximity(float(closes[ticker].iloc[-1]), buffer_zone.sma(closes[ticker])),
+        )
+        for ticker in BUFFER_ZONE_TICKERS
+    ]
+
+    holdings: list[buffer_zone.HoldingLine] = []
+    if positions:
+        weights = buffer_zone.position_weights(
+            quantities={p.ticker: p.quantity for p in positions},
+            prices={ticker: float(series.iloc[-1]) for ticker, series in closes.items()},
+        )
+        holdings = [buffer_zone.HoldingLine(p.ticker, p.quantity, weights[p.ticker]) for p in positions]
+
+    counter = _health_counter()
+    health = [daily_health(target, counter), _weekly_slot(_last_monday(now.date()), counter)]
+
+    return buffer_zone.render(sent_at=now, proximities=proximities, holdings=holdings, health=health)
+
+
+def _last_monday(today: date) -> date:
+    """가장 최근에 지나간 월요일을 찾는다.
+
+    오늘이 월요일이면 지난주 월요일을 돌려준다. 주간 알림과 이 알림은 같은 아침에 돌아
+    순서가 정해져 있지 않으므로, 오늘 것을 세면 아직 돌지 않은 실행을 빠진 것으로 읽는다.
+
+    Args:
+        today: 오늘 날짜.
+
+    Returns:
+        가장 최근 월요일.
+    """
+    offset = today.weekday()
+    return today - timedelta(days=offset if offset else 7)
+
+
+def _weekly_slot(monday: date, counter) -> HealthLine:
+    """주간 알림이 지난 월요일에 돌았는지 적는다.
+
+    Args:
+        monday: 지난 월요일.
+        counter: 실행 수를 세는 함수.
+
+    Returns:
+        점검 줄.
+    """
+    try:
+        actual = counter(WORKFLOW_USDKRW, monday)
+        detail = f"{actual}/{expected_runs(WORKFLOW_USDKRW, monday)}"
+    except Exception as exc:
+        logger.warning(f"주간 실행 이력을 읽지 못했습니다: {exc}")
+        detail = LOOKUP_FAILED
+
+    return HealthLine("최근 주간", format_day(monday), detail)
+
+
+def _run_reverse(market: Market, now: datetime) -> str | None:
+    """역방향 알림 문구를 만든다.
+
+    Args:
+        market: 시장.
+        now: 실행 시각.
+
+    Returns:
+        보낼 문구. 휴장이거나 신호가 멀면 None.
+
+    Raises:
+        ValueError: 한국 장중 시세 소스가 아직 정해지지 않았을 때.
+    """
+    if market is Market.KR:
+        if not is_kr_trading_day(now.date()):
+            logger.debug(f"{now.date()} 는 한국 휴장입니다.")
+            return None
+        raise ValueError("한국 장중 시세 소스가 아직 정해지지 않았습니다. 장중 실측을 먼저 마치세요.")
+
+    target = now.date() - timedelta(days=1)
+    if not is_us_trading_day(target):
+        logger.debug(f"{target} 은 미국 휴장이라 새 종가가 없습니다.")
+        return None
+
+    entry = _load_rank(RANK_KEY_QQQ)
+    closes = fetch_closes([TICKER_QQQ])[TICKER_QQQ]
+    if len(closes) < 2:
+        raise ValueError("전일 종가와 당일 종가가 모두 필요합니다.")
+
+    prev_close = float(closes.iloc[-2])
+    current = float(closes.iloc[-1])
+    judgement = judge(prev_close=prev_close, current_price=current, thresholds=entry.thresholds)
+    if judgement.direction is None:
+        logger.debug("신호가 여유 밖이라 보내지 않습니다.")
+        return None
+
+    return render_reverse(
+        market=market,
+        symbol=TICKER_QQQ,
+        judgement=judgement,
+        prices=signal_prices(prev_close, entry.thresholds),
+        thresholds=entry.thresholds,
+        sent_at=now,
+    )
+
+
+def _weekly_extreme_line(symbol_key: str, closes: pd.Series, start: date, end: date) -> list[usdkrw.ReverseLine]:
+    """한 종목의 지난주 역방향 요약을 만든다.
+
+    Args:
+        symbol_key: 순위 등락률 파일의 종목 열쇠.
+        closes: 종가 계열.
+        start: 지난주 시작일.
+        end: 지난주 종료일.
+
+    Returns:
+        폭등·폭락 두 줄.
+
+    Raises:
+        ValueError: 지난주 거래일이 없을 때.
+    """
+    entry = _load_rank(symbol_key)
+    changes = closes.pct_change().dropna()
+    window = changes[(changes.index >= start) & (changes.index <= end)]
+    extremes = usdkrw.weekly_extremes(window)
+
+    return [
+        usdkrw.ReverseLine(
+            "폭등",
+            entry.thresholds.surge_1st,
+            entry.thresholds.surge_20th,
+            "지난주 최고",
+            extremes.highest.change_rate,
+            extremes.highest.on,
+        ),
+        usdkrw.ReverseLine(
+            "폭락",
+            entry.thresholds.plunge_1st,
+            entry.thresholds.plunge_20th,
+            "지난주 최저",
+            extremes.lowest.change_rate,
+            extremes.lowest.on,
+        ),
+    ]
+
+
+def run_usdkrw(now: datetime) -> str:
+    """원달러 주간 알림 문구를 만든다.
+
+    Args:
+        now: 실행 시각.
+
+    Returns:
+        보낼 문구.
+    """
+    end = now.date()
+    start = end - timedelta(days=USDKRW_LOOKBACK_DAYS)
+    series = fetch_usdkrw(load_api_key(ENV_FILE_PATH), ECOS_USDKRW_STAT_CODE, ECOS_USDKRW_ITEM_CODE, start, end)
+
+    as_of = series.index[-1]
+    current = float(series.iloc[-1])
+    windows = [
+        usdkrw.WindowLine(
+            years=years,
+            mean_price=float(usdkrw.window_slice(series, as_of, years).mean()),
+            deviation_rate=usdkrw.mean_deviation(current, usdkrw.window_slice(series, as_of, years)),
+        )
+        for years in USDKRW_WINDOW_YEARS
+    ]
+
+    week_start = _last_monday(end)
+    week_end = week_start + timedelta(days=4)
+    closes = fetch_closes([YF_TICKER_KODEX, TICKER_QQQ])
+    reverses = [
+        usdkrw.ReverseBlock(
+            SYMBOL_KODEX,
+            _weekly_extreme_line(RANK_KEY_KODEX, _to_date_index(closes[YF_TICKER_KODEX]), week_start, week_end),
+        ),
+        usdkrw.ReverseBlock(
+            TICKER_QQQ,
+            _weekly_extreme_line(RANK_KEY_QQQ, _to_date_index(closes[TICKER_QQQ]), week_start, week_end),
+        ),
+    ]
+
+    health = weekly_health(week_start, week_end, _health_counter())
+    return usdkrw.render(
+        sent_at=now, current=current, as_of=as_of, windows=windows, reverses=reverses, health=health
+    )
+
+
+def _to_date_index(series: pd.Series) -> pd.Series:
+    """시각이 붙은 인덱스를 날짜로 바꾼다.
+
+    Args:
+        series: 종가 계열.
+
+    Returns:
+        날짜를 인덱스로 갖는 계열.
+    """
+    return pd.Series(series.to_numpy(), index=pd.Index([stamp.date() for stamp in series.index]), dtype="float64")
+
+
+def build_message(alert: str, now: datetime) -> str | None:
+    """알림 하나의 문구를 만든다.
+
+    Args:
+        alert: 알림 이름.
+        now: 실행 시각.
+
+    Returns:
+        보낼 문구. 보낼 것이 없으면 None.
+
+    Raises:
+        ValueError: 알림 이름을 모를 때.
+    """
+    if alert == ALERT_BUFFER_ZONE:
+        return run_buffer_zone(now)
+    if alert == ALERT_REVERSE_KR:
+        return _run_reverse(Market.KR, now)
+    if alert == ALERT_REVERSE_US:
+        return _run_reverse(Market.US, now)
+    if alert == ALERT_USDKRW:
+        return run_usdkrw(now)
+    raise ValueError(f"모르는 알림입니다: {alert}")
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """명령줄 인자를 읽는다.
+
+    Args:
+        argv: 인자 목록.
+
+    Returns:
+        읽은 인자.
+    """
+    parser = argparse.ArgumentParser(description="알림을 실행합니다.")
+    parser.add_argument("alert", choices=ALERT_NAMES, help="실행할 알림")
+    parser.add_argument("--dry-run", action="store_true", help="보내지 않고 문구만 표준출력으로 찍습니다")
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """알림을 실행한다.
+
+    Args:
+        argv: 인자 목록.
+
+    Returns:
+        종료 코드. 실패하면 1.
+    """
+    args = parse_args(argv)
+    now = datetime.now(TZ_KST)
+
+    try:
+        message = build_message(args.alert, now)
+    except Exception as exc:
+        logger.warning(f"{args.alert} 실행이 실패했습니다: {exc}")
+        if not args.dry_run:
+            token = _config("TELEGRAM_BOT_TOKEN", required=False)
+            chat_id = _config("TELEGRAM_CHAT_ID", required=False)
+            if token and chat_id:
+                telegram.send_without_raising(token, chat_id, failure.render(args.alert, exc, now))
+        else:
+            print(failure.render(args.alert, exc, now))
+        return 1
+
+    if message is None:
+        logger.debug(f"{args.alert} 은 보낼 것이 없어 조용히 끝냅니다.")
+        return 0
+
+    if args.dry_run:
+        print(message)
+        return 0
+
+    telegram.send(_config("TELEGRAM_BOT_TOKEN"), _config("TELEGRAM_CHAT_ID"), message)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
