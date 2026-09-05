@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# 가상환경
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# 자격증명 — 저장소에 절대 포함하지 않는다
+.env
+.env.*
+
+# state/ 는 git 으로 추적한다 — 무시하지 않는다.
+# 사람이 손으로 쓰는 파일이고, 프라이빗 리포이며, 다음 실행이 읽어야 한다.
+# 시세는 저장하지 않는다. 매 실행마다 받는다 (docs/DESIGN.md).
+
+# 실행 로그
+logs/
