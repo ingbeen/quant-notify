@@ -12,14 +12,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from notify.alerts.formatting import (
-    display_width,
-    format_day,
-    format_rate,
-    format_weight,
-    pad_end,
-    pad_start,
-)
+from notify.alerts.formatting import bold, format_day, format_rate, format_weight
 from notify.alerts.health import HealthLine
 from notify.common_constants import MA_PERIOD
 
@@ -117,35 +110,8 @@ class HoldingLine:
     weight_ratio: float
 
 
-# 근접도 값이 차지하는 칸. 부호와 소수 둘째 자리까지 들어간다
-_RATE_COLUMN = 9
-
-# 근접도를 두 칸으로 늘어놓을 때 칸 사이 간격
-_PAIR_GAP = 6
-
-# 보유 줄의 수량과 비중이 차지하는 칸
-_QUANTITY_COLUMN = 8
-_WEIGHT_COLUMN = 9
-
-# 점검 줄의 라벨과 기간이 차지하는 칸
-_HEALTH_LABEL_COLUMN = 9
-_HEALTH_PERIOD_COLUMN = 10
-
-def _proximity_cell(line: ProximityLine, ticker_width: int) -> str:
-    """근접도 한 칸을 만든다.
-
-    Args:
-        line: 근접도.
-        ticker_width: 종목 이름이 차지할 칸.
-
-    Returns:
-        종목과 값을 이어 붙인 칸.
-    """
-    return pad_end(line.ticker, ticker_width) + pad_start(format_rate(line.proximity_rate), _RATE_COLUMN)
-
-
 def _proximity_rows(proximities: Sequence[ProximityLine]) -> list[str]:
-    """근접도를 두 칸씩 늘어놓는다.
+    """근접도 줄을 만든다. 한 줄에 한 종목씩 쌓는다.
 
     Args:
         proximities: 종목별 근접도.
@@ -153,10 +119,7 @@ def _proximity_rows(proximities: Sequence[ProximityLine]) -> list[str]:
     Returns:
         줄 목록.
     """
-    ticker_width = max((display_width(line.ticker) for line in proximities), default=0)
-    cells = [_proximity_cell(line, ticker_width) for line in proximities]
-    pairs = [cells[index : index + 2] for index in range(0, len(cells), 2)]
-    return ["  " + (" " * _PAIR_GAP).join(pair) for pair in pairs]
+    return [f"{line.ticker} {format_rate(line.proximity_rate)}" for line in proximities]
 
 
 def _holding_rows(holdings: Sequence[HoldingLine]) -> list[str]:
@@ -168,13 +131,8 @@ def _holding_rows(holdings: Sequence[HoldingLine]) -> list[str]:
     Returns:
         줄 목록.
     """
-    ticker_width = max(display_width(line.ticker) for line in holdings)
     return [
-        "  "
-        + pad_end(line.ticker, ticker_width)
-        + pad_start(f"{line.quantity:,}주", _QUANTITY_COLUMN)
-        + pad_start(format_weight(line.weight_ratio), _WEIGHT_COLUMN)
-        for line in holdings
+        f"{line.ticker} {line.quantity:,}주 · {format_weight(line.weight_ratio)}" for line in holdings
     ]
 
 
@@ -187,15 +145,7 @@ def _health_rows(health: Sequence[HealthLine]) -> list[str]:
     Returns:
         줄 목록.
     """
-    return [
-        "  "
-        + pad_end(line.label, _HEALTH_LABEL_COLUMN)
-        + " "
-        + pad_end(line.period, _HEALTH_PERIOD_COLUMN)
-        + "   "
-        + line.detail
-        for line in health
-    ]
+    return [f"{line.label} {line.period} · {line.detail}" for line in health]
 
 
 def render(
@@ -224,13 +174,13 @@ def render(
         raise ValueError("이동평균 근접도가 비어 있어 알림을 만들 수 없습니다.")
 
     rows = [
-        f"[QBT] {format_day(sent_at.date())} {sent_at:%H:%M}",
+        f"{bold('QBT')} · {format_day(sent_at.date())} {sent_at:%H:%M}",
         "",
-        "MA 근접도",
+        bold("MA 근접도"),
         *_proximity_rows(proximities),
     ]
     if holdings:
-        rows += ["", "보유", *_holding_rows(holdings)]
-    rows += ["", "점검", *_health_rows(health)]
+        rows += ["", bold("보유"), *_holding_rows(holdings)]
+    rows += ["", bold("점검"), *_health_rows(health)]
 
     return "\n".join(rows)

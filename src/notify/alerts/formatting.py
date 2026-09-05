@@ -1,59 +1,66 @@
 """알림 문구의 공통 표기 규칙.
 
-문구는 고정폭으로 읽힌다. 한글은 두 칸을 차지하므로 글자 수가 아니라 **표시 폭**으로
-자리를 맞춰야 열이 어긋나지 않는다.
+문구는 텔레그램 HTML 모드로 보낸다. **강조 수단은 굵게와 빨간 점 둘뿐이다** —
+텔레그램은 글자 색을 지원하지 않고, 고정폭(`<pre>`)은 다른 서식과 조합할 수 없어
+강조를 넣으려면 고정폭을 버려야 한다.
+
+그래서 **한 줄에 값 하나를 쌓는다.** 정렬로 뜻을 나르지 않으므로 가로 폭 제약이 없다.
+모바일은 긴 줄을 낱말 단위로 접으므로, 열을 맞춰도 좁은 화면에서 그대로 무너진다.
 
 표기 규칙의 정본은 `docs/DESIGN.md` 4.5 절이다.
 """
 
 from __future__ import annotations
 
-import unicodedata
 from datetime import date
 
 # 한글 요일. date.weekday() 순서에 맞춘다
 _WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
 
-# 두 칸을 차지하는 문자 폭 구분
-_WIDE = frozenset({"W", "F"})
+# 눈에 띄어야 하는 것에만 붙인다 — 역방향 신호 · 실패 · 점검 이상.
+# 소스를 ASCII 로 유지하려고 이스케이프로 적는다 (루트 CLAUDE.md 의 이모지 규칙)
+RED_DOT = "\U0001f534"
 
 
-def display_width(text: str) -> int:
-    """고정폭에서 차지하는 칸 수를 센다.
+def escape_html(text: str) -> str:
+    """텔레그램 HTML 모드에서 뜻을 가지는 문자를 막는다.
 
-    Args:
-        text: 잴 문자열.
-
-    Returns:
-        칸 수. 한글과 전각 기호는 두 칸으로 센다.
-    """
-    return sum(2 if unicodedata.east_asian_width(char) in _WIDE else 1 for char in text)
-
-
-def pad_start(text: str, width: int) -> str:
-    """표시 폭을 기준으로 오른쪽에 붙인다.
+    **값에만 쓴다.** 조립이 끝난 문구에 쓰면 강조 태그까지 글자로 바뀐다.
 
     Args:
-        text: 붙일 문자열.
-        width: 목표 칸 수.
+        text: 가릴 문자열.
 
     Returns:
-        앞을 공백으로 채운 문자열. 이미 넘치면 그대로 돌려준다.
+        이스케이프한 문자열.
     """
-    return " " * max(0, width - display_width(text)) + text
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def pad_end(text: str, width: int) -> str:
-    """표시 폭을 기준으로 왼쪽에 붙인다.
+def bold(text: str) -> str:
+    """굵게 표시한다.
 
     Args:
-        text: 붙일 문자열.
-        width: 목표 칸 수.
+        text: 강조할 문자열.
 
     Returns:
-        뒤를 공백으로 채운 문자열. 이미 넘치면 그대로 돌려준다.
+        굵게 표시한 문자열.
     """
-    return text + " " * max(0, width - display_width(text))
+    return f"<b>{text}</b>"
+
+
+def alert(text: str) -> str:
+    """빨간 점을 붙여 굵게 표시한다.
+
+    **꼭 봐야 하는 것에만 쓴다** — 역방향 신호 · 실패 · 점검 이상. 정기 알림에 쓰면
+    색이 흔해져 정작 사건일 때 눈에 걸리지 않는다.
+
+    Args:
+        text: 강조할 문자열.
+
+    Returns:
+        빨간 점을 붙여 굵게 표시한 문자열.
+    """
+    return f"{RED_DOT} {bold(text)}"
 
 
 def format_day(day: date) -> str:
@@ -66,6 +73,18 @@ def format_day(day: date) -> str:
         `MM-DD (요일)` 형태.
     """
     return f"{day:%m-%d} ({_WEEKDAYS[day.weekday()]})"
+
+
+def format_day_paren(day: date) -> str:
+    """날짜를 값 뒤에 덧붙이는 표기로 바꾼다.
+
+    Args:
+        day: 날짜.
+
+    Returns:
+        `(MM-DD 요일)` 형태.
+    """
+    return f"({day:%m-%d} {_WEEKDAYS[day.weekday()]})"
 
 
 def format_rate(rate: float, decimals: int = 2) -> str:

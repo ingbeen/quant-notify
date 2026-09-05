@@ -4,7 +4,8 @@
 여기 기대값은 그 예시를 그대로 옮긴 것이다. 코드가 이것과 달라지면 문서가 아니라
 코드가 틀린 것이다.
 
-고정폭으로 읽히므로 자릿수와 정렬까지 함께 묶는다. 한글은 두 칸을 차지한다.
+**강조가 어디에 붙는지도 함께 묶는다.** 빨간 점은 역방향·실패·점검 이상에만 붙는다.
+정기 알림에 번지면 색이 흔해져 정작 사건일 때 눈에 걸리지 않는다.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import pytest
 from notify.alerts.buffer_zone import HoldingLine, ProximityLine
 from notify.alerts.buffer_zone import render as render_buffer_zone
 from notify.alerts.failure import render as render_failure
-from notify.alerts.formatting import display_width
+from notify.alerts.formatting import RED_DOT
 from notify.alerts.health import HealthLine, daily_health, expected_runs, weekly_health
 from notify.alerts.reverse_rank import Market, judge, render, signal_prices
 from notify.alerts.usdkrw import ReverseBlock, ReverseLine, WindowLine
@@ -77,10 +78,11 @@ class TestReverseRankKorea:
         )
 
         assert text == (
-            "[역방향] KODEX 200 · 폭락 근접   09-04 (금) 12:00\n"
+            f"{RED_DOT} <b>역방향 · KODEX 200 · 폭락 근접</b>\n"
+            "09-04 (금) 12:00\n"
             "\n"
-            "현재   106,200원   -5.42%\n"
-            "신호   105,200원   -6.31%"
+            "현재 106,200원 -5.42%\n"
+            "신호 105,200원 -6.31%"
         )
 
     def test_uses_reached_for_intraday(self) -> None:
@@ -94,7 +96,7 @@ class TestReverseRankKorea:
             sent_at=datetime(2026, 9, 4, 14, 30, tzinfo=TZ_KST),
         )
 
-        assert text.startswith("[역방향] KODEX 200 · 폭락 도달   09-04 (금) 14:30")
+        assert text.startswith(f"{RED_DOT} <b>역방향 · KODEX 200 · 폭락 도달</b>")
 
     def test_surge_side_reads_the_other_threshold(self) -> None:
         """폭등 쪽은 폭등 순위 등락률을 신호로 낸다."""
@@ -126,10 +128,11 @@ class TestReverseRankUnitedStates:
         )
 
         assert text == (
-            "[역방향] QQQ · 폭등 발생   09-04 (금) 07:30\n"
+            f"{RED_DOT} <b>역방향 · QQQ · 폭등 발생</b>\n"
+            "09-04 (금) 07:30\n"
             "\n"
-            "종가   $619.50   +7.80%\n"
-            "신호   $617.34   +7.42%"
+            "종가 $619.50 +7.80%\n"
+            "신호 $617.34 +7.42%"
         )
 
     def test_uses_occurred_not_reached(self) -> None:
@@ -145,38 +148,6 @@ class TestReverseRankUnitedStates:
 
         assert "폭등 발생" in text
         assert "도달" not in text
-
-
-class TestAlignment:
-    """정렬."""
-
-    def test_price_column_lines_up(self) -> None:
-        """가격 자릿수가 달라도 열이 맞는다."""
-        text = _render(
-            Market.KR,
-            "KODEX 200",
-            KODEX,
-            prev_close=1000000.0,
-            current_price=940000.0,
-            sent_at=datetime(2026, 9, 4, 12, 0, tzinfo=TZ_KST),
-        )
-        body = text.split("\n")[2:]
-
-        assert display_width(body[0]) == display_width(body[1])
-
-    def test_body_rows_have_equal_width(self) -> None:
-        """정본 예시의 두 줄은 폭이 같다."""
-        text = _render(
-            Market.US,
-            "QQQ",
-            QQQ,
-            prev_close=574.70,
-            current_price=619.50,
-            sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
-        )
-        body = text.split("\n")[2:]
-
-        assert display_width(body[0]) == display_width(body[1]) == 23
 
 
 class TestSilence:
@@ -230,35 +201,26 @@ class TestBufferZone:
         text = self._render([HoldingLine("QLD", 200, 0.873), HoldingLine("GLD", 10, 0.127)])
 
         assert text == (
-            "[QBT] 09-04 (금) 07:30\n"
+            "<b>QBT</b> · 09-04 (금) 07:30\n"
             "\n"
-            "MA 근접도\n"
-            "  SPY  +11.56%      QQQ  +19.38%\n"
-            "  GLD   +2.46%      TLT   -0.98%\n"
+            "<b>MA 근접도</b>\n"
+            "SPY +11.56%\n"
+            "QQQ +19.38%\n"
+            "GLD +2.46%\n"
+            "TLT -0.98%\n"
             "\n"
-            "보유\n"
-            "  QLD   200주    87.3%\n"
-            "  GLD    10주    12.7%\n"
+            "<b>보유</b>\n"
+            "QLD 200주 · 87.3%\n"
+            "GLD 10주 · 12.7%\n"
             "\n"
-            "점검\n"
-            "  전일      09-03 (목)   역방향 KR 2/2 · US 1/1\n"
-            "  최근 주간 08-31 (월)   1/1"
+            "<b>점검</b>\n"
+            "전일 09-03 (목) · 역방향 KR 2/2 · US 1/1\n"
+            "최근 주간 08-31 (월) · 1/1"
         )
 
-    def test_proximity_rows_line_up(self) -> None:
-        """근접도 두 줄은 폭이 같다."""
-        rows = self._render([HoldingLine("QLD", 200, 0.873)]).split("\n")[3:5]
-
-        assert display_width(rows[0]) == display_width(rows[1]) == 32
-
-    def test_health_dates_start_at_the_same_column(self) -> None:
-        """점검 두 줄의 날짜가 같은 칸에서 시작한다.
-
-        라벨의 글자 수가 달라도(전일 2자 · 최근 주간 4자) 열이 맞아야 한다.
-        """
-        rows = self._render([HoldingLine("QLD", 200, 0.873)]).split("\n")[-2:]
-
-        assert display_width(rows[0].split("09-03")[0]) == display_width(rows[1].split("08-31")[0])
+    def test_carries_no_red_dot_when_healthy(self) -> None:
+        """정기 알림에는 색을 쓰지 않는다. 점검이 정상이면 빨간 점이 없다."""
+        assert RED_DOT not in self._render([HoldingLine("QLD", 200, 0.873)])
 
     def test_empty_holdings_drop_the_block(self) -> None:
         """보유가 없으면 그 블록을 통째로 빼고 알림은 그대로 낸다."""
@@ -283,8 +245,11 @@ class TestUsdKrw:
     """원달러 주간 알림 문구."""
 
     @staticmethod
-    def _render() -> str:
+    def _render(kodex_plunge_rate: float = -0.0350) -> str:
         """정본 예시와 같은 조건으로 문구를 만든다.
+
+        Args:
+            kodex_plunge_rate: KODEX 200 의 지난주 최저 등락률. 신호 여부를 가른다.
 
         Returns:
             보낼 문구.
@@ -303,58 +268,67 @@ class TestUsdKrw:
                 ReverseBlock(
                     "KODEX 200",
                     [
-                        ReverseLine("폭등", 0.2417, 0.0610, "지난주 최고", 0.0210, date(2026, 9, 4)),
-                        ReverseLine("폭락", -0.1246, -0.0631, "지난주 최저", -0.0350, date(2026, 9, 1)),
+                        ReverseLine("폭등", 0.2417, 0.0610, 0.0210, date(2026, 9, 4)),
+                        ReverseLine("폭락", -0.1246, -0.0631, kodex_plunge_rate, date(2026, 9, 1)),
                     ],
                 ),
                 ReverseBlock(
                     "QQQ",
                     [
-                        ReverseLine("폭등", 0.1684, 0.0742, "지난주 최고", 0.0325, date(2026, 9, 2)),
-                        ReverseLine("폭락", -0.1198, -0.0687, "지난주 최저", -0.0088, date(2026, 9, 1)),
+                        ReverseLine("폭등", 0.1684, 0.0742, 0.0325, date(2026, 9, 2)),
+                        ReverseLine("폭락", -0.1198, -0.0687, -0.0088, date(2026, 9, 1)),
                     ],
                 ),
             ],
-            health=HealthLine("지난주", "08-31 (월) ~ 09-04 (금)", "버퍼존 5/5 · 역방향 KR 10/10 · US 5/5"),
+            health=HealthLine("지난주", "08-31 (월) ~ 09-05 (토)", "버퍼존 5/5 · 역방향 KR 10/10 · US 5/5"),
         )
 
     def test_matches_the_documented_example(self) -> None:
         """정본 예시와 글자 단위로 같다."""
         assert self._render() == (
-            "[주간] 09-07 (월) 07:30\n"
+            "<b>주간</b> · 09-07 (월) 07:30\n"
             "\n"
-            "원달러  1,384.80원   09-04 (금)\n"
-            "   1년 평균  1,462원 대비    -5.3%\n"
-            "   3년 평균  1,404원 대비    -1.3%\n"
-            "   5년 평균  1,351원 대비    +2.5%\n"
-            "  10년 평균  1,247원 대비   +11.1%\n"
+            "<b>원달러 1,384.80원</b>\n"
+            "09-04 (금) 기준\n"
             "\n"
-            "역방향\n"
-            "  KODEX 200\n"
-            "    폭등   1위 +24.17%     20위  +6.10%     지난주 최고  +2.10%  09-04 (금)\n"
-            "    폭락   1위 -12.46%     20위  -6.31%     지난주 최저  -3.50%  09-01 (화)\n"
+            "1년 평균 1,462원 대비 -5.3%\n"
+            "3년 평균 1,404원 대비 -1.3%\n"
+            "5년 평균 1,351원 대비 +2.5%\n"
+            "10년 평균 1,247원 대비 +11.1%\n"
             "\n"
-            "  QQQ\n"
-            "    폭등   1위 +16.84%     20위  +7.42%     지난주 최고  +3.25%  09-02 (수)\n"
-            "    폭락   1위 -11.98%     20위  -6.87%     지난주 최저  -0.88%  09-01 (화)\n"
+            "<b>역방향 · KODEX 200</b>\n"
+            "폭등 1위 +24.17% / 20위 +6.10%\n"
+            "지난주 최고 +2.10% (09-04 금)\n"
+            "폭락 1위 -12.46% / 20위 -6.31%\n"
+            "지난주 최저 -3.50% (09-01 화)\n"
             "\n"
-            "점검\n"
-            "  지난주   08-31 (월) ~ 09-04 (금)\n"
-            "  버퍼존 5/5 · 역방향 KR 10/10 · US 5/5"
+            "<b>역방향 · QQQ</b>\n"
+            "폭등 1위 +16.84% / 20위 +7.42%\n"
+            "지난주 최고 +3.25% (09-02 수)\n"
+            "폭락 1위 -11.98% / 20위 -6.87%\n"
+            "지난주 최저 -0.88% (09-01 화)\n"
+            "\n"
+            "<b>점검</b>\n"
+            "지난주 08-31 (월) ~ 09-05 (토)\n"
+            "버퍼존 5/5 · 역방향 KR 10/10 · US 5/5"
         )
 
-    def test_window_rows_line_up(self) -> None:
-        """창 네 줄은 폭이 같다. 10년만 자릿수가 하나 많아도 어긋나지 않는다."""
-        rows = self._render().split("\n")[3:7]
+    def test_quiet_week_carries_no_red_dot(self) -> None:
+        """신호가 없던 주에는 색을 쓰지 않는다."""
+        assert RED_DOT not in self._render()
 
-        assert {display_width(row) for row in rows} == {34}
+    def test_signal_week_marks_only_that_row(self) -> None:
+        """지난주 값이 20위 등락률에 닿으면 그 줄만 신호로 바뀌고 강조된다."""
+        text = self._render(kodex_plunge_rate=-0.0648)
 
-    def test_reverse_rows_line_up(self) -> None:
-        """역방향 네 줄은 폭이 같다."""
-        text = self._render().split("\n")
-        rows = [row for row in text if "1위" in row]
+        assert f"{RED_DOT} <b>지난주 신호 -6.48% (09-01 화)</b>" in text
+        assert "지난주 최고 +2.10% (09-04 금)" in text
+        assert "지난주 최저" not in text.split("<b>역방향 · QQQ</b>")[0]
+        assert text.count(RED_DOT) == 1
 
-        assert {display_width(row) for row in rows} == {75}
+    def test_boundary_counts_as_a_signal(self) -> None:
+        """20위 등락률과 같으면 신호다. 규격이 「이 값 이상」이다."""
+        assert f"{RED_DOT} <b>지난주 신호 -6.31%" in self._render(kodex_plunge_rate=-0.0631)
 
     def test_carries_no_verdict_words(self) -> None:
         """판정 어휘를 붙이지 않는다. 예측력이 없는 지표가 행동 지시가 되면 안 된다."""
@@ -362,28 +336,6 @@ class TestUsdKrw:
 
         for word in ("쌈", "비쌈", "저평가", "고평가", "매수", "매도"):
             assert word not in text
-
-    def test_signal_week_changes_only_that_row(self) -> None:
-        """지난주에 신호가 있었으면 그 방향 줄만 바뀐다."""
-        text = render_usdkrw(
-            sent_at=datetime(2026, 9, 7, 7, 30, tzinfo=TZ_KST),
-            current=1384.80,
-            as_of=date(2026, 9, 4),
-            windows=[WindowLine(1, 1462, -0.053)],
-            reverses=[
-                ReverseBlock(
-                    "KODEX 200",
-                    [
-                        ReverseLine("폭등", 0.2417, 0.0610, "지난주 최고", 0.0210, date(2026, 9, 4)),
-                        ReverseLine("폭락", -0.1246, -0.0631, "지난주 신호", -0.0648, date(2026, 9, 2)),
-                    ],
-                )
-            ],
-            health=HealthLine("지난주", "08-31 (월) ~ 09-04 (금)", "버퍼존 5/5"),
-        )
-
-        assert "    폭락   1위 -12.46%     20위  -6.31%     지난주 신호  -6.48%  09-02 (수)" in text
-        assert "지난주 최고  +2.10%  09-04 (금)" in text
 
 
 class TestFailure:
@@ -398,7 +350,8 @@ class TestFailure:
         )
 
         assert text == (
-            "[QBT · 실패] buffer_zone   09-04 (금) 07:31\n"
+            f"{RED_DOT} <b>실패 · buffer_zone</b>\n"
+            "09-04 (금) 07:31\n"
             "\n"
             "RuntimeError: yfinance 조회 실패 — QQQ"
         )
@@ -409,7 +362,7 @@ class TestFailure:
 
         assert "재시도" not in text
         assert "Run workflow" not in text
-        assert len(text.split("\n")) == 3
+        assert len(text.split("\n")) == 4
 
     def test_masks_credentials_in_the_message(self) -> None:
         """예외에 담긴 인증키를 가린다. 실패 알림도 로그에 남는다."""
@@ -419,6 +372,15 @@ class TestFailure:
         text = render_failure("usdkrw", error, datetime(2026, 9, 4, 7, 31, tzinfo=TZ_KST))
 
         assert key not in text
+
+    def test_escapes_markup_in_the_message(self) -> None:
+        """예외 메시지에 섞인 태그 문자를 가린다. 안 가리면 문구 전체가 깨진다."""
+        error = ValueError("<b>주의</b> & 실패")
+
+        text = render_failure("usdkrw", error, datetime(2026, 9, 4, 7, 31, tzinfo=TZ_KST))
+
+        assert "&lt;b&gt;주의&lt;/b&gt; &amp; 실패" in text
+        assert "<b>주의</b>" not in text
 
 
 class TestHealthLineFlowsIntoAlerts:
@@ -452,11 +414,11 @@ class TestHealthLineFlowsIntoAlerts:
             health=[line, HealthLine("최근 주간", "08-31 (월)", "1/1")],
         )
 
-        assert "  전일      09-03 (목)   역방향 KR 2/2 · US 1/1" in text
+        assert "전일 09-03 (목) · 역방향 KR 2/2 · US 1/1" in text
 
     def test_weekly_line_matches_the_documented_row(self) -> None:
         """지난주 점검 줄이 정본의 그 두 줄로 이어진다."""
-        line = weekly_health(date(2026, 8, 31), date(2026, 9, 4), self._as_expected)
+        line = weekly_health(date(2026, 8, 31), date(2026, 9, 5), self._as_expected)
 
         text = render_usdkrw(
             sent_at=datetime(2026, 9, 7, 7, 30, tzinfo=TZ_KST),
@@ -467,4 +429,4 @@ class TestHealthLineFlowsIntoAlerts:
             health=line,
         )
 
-        assert "  지난주   08-31 (월) ~ 09-04 (금)\n  버퍼존 5/5 · 역방향 KR 10/10 · US 5/5" in text
+        assert "지난주 08-31 (월) ~ 09-05 (토)\n버퍼존 5/5 · 역방향 KR 10/10 · US 5/5" in text

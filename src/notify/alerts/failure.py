@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from notify.alerts.formatting import format_day
+from notify.alerts.formatting import alert, escape_html, format_day
 from notify.utils.logger import mask_credentials
 
 
@@ -21,6 +21,9 @@ def render(alert_name: str, error: BaseException, sent_at: datetime) -> str:
     예외 메시지를 마스킹해서 담는다. 조회 주소에 인증키가 들어가는 경우가 있고,
     이 저장소는 실행 로그가 공개되는 곳에서 돈다.
 
+    **예외 메시지는 이스케이프한다.** 바깥에서 온 문자열이라 `<` 나 `&` 가 섞이면
+    문구 전체가 깨진다.
+
     Args:
         alert_name: 실패한 알림 이름.
         error: 잡은 예외.
@@ -29,11 +32,12 @@ def render(alert_name: str, error: BaseException, sent_at: datetime) -> str:
     Returns:
         보낼 문구.
     """
-    detail = mask_credentials(f"{type(error).__name__}: {error}")
+    detail = escape_html(mask_credentials(f"{type(error).__name__}: {error}"))
 
     return "\n".join(
         [
-            f"[QBT · 실패] {alert_name}   {format_day(sent_at.date())} {sent_at:%H:%M}",
+            alert(f"실패 · {alert_name}"),
+            f"{format_day(sent_at.date())} {sent_at:%H:%M}",
             "",
             detail,
         ]

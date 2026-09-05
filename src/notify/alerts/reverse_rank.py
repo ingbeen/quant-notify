@@ -13,14 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
-from notify.alerts.formatting import (
-    display_width,
-    format_day,
-    format_krw,
-    format_rate,
-    format_usd,
-    pad_start,
-)
+from notify.alerts.formatting import alert, format_day, format_krw, format_rate, format_usd
 from notify.common_constants import REVERSE_MARGIN_RATE
 from notify.state.reverse_rank import RankThresholds
 
@@ -147,9 +140,6 @@ _PRICE_LABEL = {Market.KR: "현재", Market.US: "종가"}
 _HIT_WORD = {Market.KR: "도달", Market.US: "발생"}
 _DIRECTION_WORD = {Direction.SURGE: "폭등", Direction.PLUNGE: "폭락"}
 
-# 제목과 본문 사이 간격
-_PRICE_GAP = 3
-
 
 def _state_word(market: Market, state: SignalState) -> str:
     """상태를 시장에 맞는 말로 바꾼다.
@@ -200,9 +190,9 @@ def render(
     if judgement.direction is None:
         raise RuntimeError("내부 불변조건 위반: 방향이 없는데 문구를 만들려 했습니다.")
 
-    heading = (
-        f"[역방향] {symbol} · {_DIRECTION_WORD[judgement.direction]} {_state_word(market, judgement.state)}"
-        f"   {format_day(sent_at.date())} {sent_at:%H:%M}"
+    # 연 5~8회만 오는 알림이라 온 것 자체가 사건이다. 제목을 강조한다
+    heading = alert(
+        f"역방향 · {symbol} · {_DIRECTION_WORD[judgement.direction]} {_state_word(market, judgement.state)}"
     )
 
     money = format_krw if market is Market.KR else format_usd
@@ -210,14 +200,14 @@ def render(
     signal_price = prices.surge if is_surge else prices.plunge
     signal_rate = thresholds.surge_20th if is_surge else thresholds.plunge_20th
 
-    price_texts = [money(price) for price in (judgement.current_price, signal_price)]
-    rate_texts = [format_rate(rate) for rate in (judgement.change_rate, signal_rate)]
-    price_width = max(display_width(text) for text in price_texts)
-    rate_width = max(display_width(text) for text in rate_texts)
-
     rows = [
-        f"{label}{' ' * _PRICE_GAP}{pad_start(price, price_width)}{' ' * _PRICE_GAP}{pad_start(rate, rate_width)}"
-        for label, price, rate in zip((_PRICE_LABEL[market], "신호"), price_texts, rate_texts, strict=True)
+        f"{label} {money(price)} {format_rate(rate)}"
+        for label, price, rate in zip(
+            (_PRICE_LABEL[market], "신호"),
+            (judgement.current_price, signal_price),
+            (judgement.change_rate, signal_rate),
+            strict=True,
+        )
     ]
 
-    return "\n".join([heading, "", *rows])
+    return "\n".join([heading, f"{format_day(sent_at.date())} {sent_at:%H:%M}", "", *rows])

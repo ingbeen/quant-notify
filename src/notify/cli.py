@@ -25,12 +25,11 @@ from dotenv import dotenv_values
 from notify.alerts import buffer_zone, failure, usdkrw
 from notify.alerts.formatting import format_day
 from notify.alerts.health import (
-    LOOKUP_FAILED,
     WORKFLOW_USDKRW,
     HealthLine,
     count_success_runs,
     daily_health,
-    expected_runs,
+    measure_runs,
     weekly_health,
 )
 from notify.alerts.reverse_rank import Market, judge, signal_prices
@@ -77,6 +76,13 @@ YF_TICKER_KODEX = "069500.KS"
 
 # 환율 조회 기간. 10년 창을 채우고 여유를 둔다
 USDKRW_LOOKBACK_DAYS = 365 * 11
+
+# 지난주 구간의 끝. 월요일에서 며칠 뒤인지를 적는다.
+#
+# **두 구간이 갈린다.** 역방향 요약은 거래일을 보므로 금요일까지고, 점검은 실행일을
+# 보므로 토요일까지다 — 미국장 알림이 화~토에 돌기 때문이다 (docs/DESIGN.md 6.4 절).
+TRADING_WEEK_OFFSET = 4
+RUN_WEEK_OFFSET = 5
 
 
 def _config(name: str, required: bool = True) -> str:
@@ -220,14 +226,8 @@ def _weekly_slot(monday: date, counter) -> HealthLine:
     Returns:
         점검 줄.
     """
-    try:
-        actual = counter(WORKFLOW_USDKRW, monday)
-        detail = f"{actual}/{expected_runs(WORKFLOW_USDKRW, monday)}"
-    except Exception as exc:
-        logger.warning(f"주간 실행 이력을 읽지 못했습니다: {exc}")
-        detail = LOOKUP_FAILED
-
-    return HealthLine("최근 주간", format_day(monday), detail)
+    report = measure_runs("", WORKFLOW_USDKRW, [monday], counter)
+    return HealthLine("최근 주간", format_day(monday), report.text)
 
 
 def _run_reverse(market: Market, now: datetime) -> str | None:
@@ -301,7 +301,6 @@ def _weekly_extreme_line(symbol_key: str, closes: pd.Series, start: date, end: d
             "폭등",
             entry.thresholds.surge_1st,
             entry.thresholds.surge_20th,
-            "지난주 최고",
             extremes.highest.change_rate,
             extremes.highest.on,
         ),
@@ -309,7 +308,6 @@ def _weekly_extreme_line(symbol_key: str, closes: pd.Series, start: date, end: d
             "폭락",
             entry.thresholds.plunge_1st,
             entry.thresholds.plunge_20th,
-            "지난주 최저",
             extremes.lowest.change_rate,
             extremes.lowest.on,
         ),
@@ -341,20 +339,24 @@ def run_usdkrw(now: datetime) -> str:
     ]
 
     week_start = _last_monday(end)
-    week_end = week_start + timedelta(days=4)
+    trading_week_end = week_start + timedelta(days=TRADING_WEEK_OFFSET)
     closes = fetch_closes([YF_TICKER_KODEX, TICKER_QQQ])
     reverses = [
         usdkrw.ReverseBlock(
             SYMBOL_KODEX,
-            _weekly_extreme_line(RANK_KEY_KODEX, _to_date_index(closes[YF_TICKER_KODEX]), week_start, week_end),
+            _weekly_extreme_line(
+                RANK_KEY_KODEX, _to_date_index(closes[YF_TICKER_KODEX]), week_start, trading_week_end
+            ),
         ),
         usdkrw.ReverseBlock(
             TICKER_QQQ,
-            _weekly_extreme_line(RANK_KEY_QQQ, _to_date_index(closes[TICKER_QQQ]), week_start, week_end),
+            _weekly_extreme_line(
+                RANK_KEY_QQQ, _to_date_index(closes[TICKER_QQQ]), week_start, trading_week_end
+            ),
         ),
     ]
 
-    health = weekly_health(week_start, week_end, _health_counter())
+    health = weekly_health(week_start, week_start + timedelta(days=RUN_WEEK_OFFSET), _health_counter())
     return usdkrw.render(
         sent_at=now, current=current, as_of=as_of, windows=windows, reverses=reverses, health=health
     )

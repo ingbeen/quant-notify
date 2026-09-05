@@ -1,7 +1,8 @@
 """텔레그램으로 알림을 보낸다.
 
-**고정폭으로 보낸다.** 문구의 뜻이 정렬에 실려 있어, 비례폭으로 표시되면 열이 무너져
-읽을 수 없다. 텔레그램은 `<pre>` 안의 내용을 고정폭으로 보여준다.
+**문구가 이미 HTML 이다.** 굵게와 빨간 점으로 강조하므로 여기서 손대지 않고 그대로 보낸다.
+값 이스케이프는 문구를 만들 때 끝나 있다 — 여기서 다시 이스케이프하면 강조 태그까지
+글자로 바뀐다.
 
 **알림 채널 자체의 실패는 다시 알리지 않는다.** 실패 알림을 보내다 실패했다고 또 알림을
 보내면 같은 자리에서 돌기만 한다. 그 경우는 로그로만 남기고, GitHub Actions 실패 메일이
@@ -22,31 +23,19 @@ TELEGRAM_API = "https://api.telegram.org"
 TIMEOUT_SECONDS = 15
 
 
-def _escape_html(text: str) -> str:
-    """텔레그램 HTML 모드에서 뜻을 가지는 문자를 막는다.
-
-    Args:
-        text: 보낼 문구.
-
-    Returns:
-        이스케이프한 문구.
-    """
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
 def build_payload(chat_id: str, text: str) -> dict[str, str | bool]:
     """발송 본문을 만든다.
 
     Args:
         chat_id: 받을 대화방.
-        text: 보낼 문구.
+        text: 보낼 문구. 이미 HTML 이다.
 
     Returns:
         요청 본문.
     """
     return {
         "chat_id": chat_id,
-        "text": f"<pre>{_escape_html(text)}</pre>",
+        "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }

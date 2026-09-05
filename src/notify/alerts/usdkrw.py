@@ -12,7 +12,14 @@ from datetime import date, datetime
 
 import pandas as pd
 
-from notify.alerts.formatting import format_day, format_krw, format_rate, pad_end, pad_start
+from notify.alerts.formatting import (
+    alert,
+    bold,
+    format_day,
+    format_day_paren,
+    format_krw,
+    format_rate,
+)
 from notify.alerts.health import HealthLine
 
 
@@ -111,11 +118,13 @@ class WindowLine:
 class ReverseLine:
     """역방향 요약 한 방향.
 
+    지난주 값이 무엇인지(최고·최저·신호)는 저장하지 않고 문구를 만들 때 정한다.
+    라벨과 강조 여부가 같은 판정에서 나오므로, 두 곳에서 따로 정하면 어긋난다.
+
     Attributes:
         direction: 폭등 또는 폭락.
         rate_1st: 1위 등락률.
         rate_20th: 20위 등락률.
-        extreme_label: 지난주 값이 무엇인지 (최고 · 최저 · 신호).
         extreme_rate: 지난주 값.
         extreme_on: 그 값이 나온 날.
     """
@@ -123,7 +132,6 @@ class ReverseLine:
     direction: str
     rate_1st: float
     rate_20th: float
-    extreme_label: str
     extreme_rate: float
     extreme_on: date
 
@@ -134,19 +142,6 @@ class ReverseBlock:
 
     symbol: str
     lines: Sequence[ReverseLine]
-
-
-# 창 라벨과 값이 차지하는 칸
-_WINDOW_LABEL_COLUMN = 6
-_WINDOW_MEAN_COLUMN = 9
-_WINDOW_RATE_COLUMN = 9
-
-# 역방향 줄에서 각 조각이 차지하는 칸
-_DIRECTION_COLUMN = 8
-_FIRST_RATE_COLUMN = 7
-_TWENTIETH_RATE_COLUMN = 6
-_EXTREME_LABEL_COLUMN = 11
-_EXTREME_RATE_COLUMN = 6
 
 
 def window_slice(closes: pd.Series, end: date, years: int) -> pd.Series:
@@ -182,13 +177,47 @@ def _window_rows(windows: Sequence[WindowLine]) -> list[str]:
         줄 목록.
     """
     return [
-        pad_start(f"{line.years}년", _WINDOW_LABEL_COLUMN)
-        + " 평균"
-        + pad_start(format_krw(line.mean_price), _WINDOW_MEAN_COLUMN)
-        + " 대비"
-        + pad_start(format_rate(line.deviation_rate, 1), _WINDOW_RATE_COLUMN)
+        f"{line.years}년 평균 {format_krw(line.mean_price)} 대비 {format_rate(line.deviation_rate, 1)}"
         for line in windows
     ]
+
+
+def reached_threshold(extreme_rate: float, rate_20th: float) -> bool:
+    """지난주 값이 순위 등락률에 닿았는지 본다.
+
+    폭등은 이상, 폭락은 이하다. **순위 등락률의 부호가 방향을 말한다** —
+    폭등 20위는 양수, 폭락 20위는 음수다.
+
+    Args:
+        extreme_rate: 지난주 값. 비율.
+        rate_20th: 20위 등락률. 비율.
+
+    Returns:
+        닿았으면 True.
+    """
+    if rate_20th >= 0:
+        return extreme_rate >= rate_20th
+    return extreme_rate <= rate_20th
+
+
+def _extreme_row(line: ReverseLine) -> str:
+    """지난주 값 줄을 만든다.
+
+    **신호였으면 강조한다.** 역방향은 몇 달을 조용할 수 있어, 있었던 주에는
+    그 줄이 눈에 걸려야 한다.
+
+    Args:
+        line: 역방향 요약 한 방향.
+
+    Returns:
+        지난주 값 줄.
+    """
+    value = f"{format_rate(line.extreme_rate)} {format_day_paren(line.extreme_on)}"
+    if reached_threshold(line.extreme_rate, line.rate_20th):
+        return alert(f"지난주 신호 {value}")
+
+    label = "지난주 최고" if line.rate_20th >= 0 else "지난주 최저"
+    return f"{label} {value}"
 
 
 def _reverse_rows(blocks: Sequence[ReverseBlock]) -> list[str]:
@@ -204,21 +233,13 @@ def _reverse_rows(blocks: Sequence[ReverseBlock]) -> list[str]:
     for index, block in enumerate(blocks):
         if index:
             rows.append("")
-        rows.append(f"  {block.symbol}")
-        rows += [
-            pad_start(line.direction, _DIRECTION_COLUMN)
-            + "   1위 "
-            + pad_start(format_rate(line.rate_1st), _FIRST_RATE_COLUMN)
-            + "     20위  "
-            + pad_start(format_rate(line.rate_20th), _TWENTIETH_RATE_COLUMN)
-            + "     "
-            + pad_end(line.extreme_label, _EXTREME_LABEL_COLUMN)
-            + "  "
-            + pad_start(format_rate(line.extreme_rate), _EXTREME_RATE_COLUMN)
-            + "  "
-            + format_day(line.extreme_on)
-            for line in block.lines
-        ]
+        rows.append(bold(f"역방향 · {block.symbol}"))
+        for line in block.lines:
+            rows.append(
+                f"{line.direction} 1위 {format_rate(line.rate_1st)}"
+                f" / 20위 {format_rate(line.rate_20th)}"
+            )
+            rows.append(_extreme_row(line))
     return rows
 
 
@@ -252,18 +273,16 @@ def render(
     if not windows:
         raise ValueError("비교할 창이 없어 알림을 만들 수 없습니다.")
 
-    return "\n".join(
-        [
-            f"[주간] {format_day(sent_at.date())} {sent_at:%H:%M}",
-            "",
-            f"원달러  {format_krw(current, 2)}   {format_day(as_of)}",
-            *_window_rows(windows),
-            "",
-            "역방향",
-            *_reverse_rows(reverses),
-            "",
-            "점검",
-            f"  {health.label}   {health.period}",
-            f"  {health.detail}",
-        ]
-    )
+    rows = [
+        f"{bold('주간')} · {format_day(sent_at.date())} {sent_at:%H:%M}",
+        "",
+        bold(f"원달러 {format_krw(current, 2)}"),
+        f"{format_day(as_of)} 기준",
+        "",
+        *_window_rows(windows),
+    ]
+    if reverses:
+        rows += ["", *_reverse_rows(reverses)]
+    rows += ["", bold("점검"), f"{health.label} {health.period}", health.detail]
+
+    return "\n".join(rows)

@@ -20,8 +20,7 @@ from datetime import date, timedelta
 
 import requests
 
-from notify.alerts.formatting import format_day
-from notify.data.calendar import is_kr_trading_day, is_us_trading_day
+from notify.alerts.formatting import alert, format_day
 from notify.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,15 +31,19 @@ WORKFLOW_REVERSE_KR = "reverse_rank_kr.yml"
 WORKFLOW_REVERSE_US = "reverse_rank_us.yml"
 WORKFLOW_USDKRW = "usdkrw.yml"
 
-# 거래일 하루에 예정된 실행 횟수
-RUNS_PER_TRADING_DAY = {
-    WORKFLOW_BUFFER_ZONE: 1,
-    WORKFLOW_REVERSE_KR: 2,
-    WORKFLOW_REVERSE_US: 1,
-}
+# 발화 요일. date.weekday() 를 쓴다 (0=월). cron-job.org 설정과 같아야 한다
+#
+# 미국장 알림은 화~토다 — 한국 아침에 보는 것은 전날 미국 종가이고,
+# 일·월은 전날이 항상 미국 휴장이라 부를 이유가 없다.
+_US_ALERT_WEEKDAYS = frozenset({1, 2, 3, 4, 5})
+_KR_ALERT_WEEKDAYS = frozenset({0, 1, 2, 3, 4})
+_WEEKLY_ALERT_WEEKDAY = 0
+
+# 한국 역방향은 하루 두 번 본다 (장중 12:00 · 14:30)
+_KR_RUNS_PER_DAY = 2
 
 # 조회가 실패했을 때 쓰는 표시. 본 알림은 그대로 발송한다
-LOOKUP_FAILED = "조회 실패"
+LOOKUP_FAILED = "이력 조회 실패"
 
 # 조회 제한 시간 (초)
 TIMEOUT_SECONDS = 15
@@ -101,45 +104,77 @@ def count_success_runs(repository: str, token: str, workflow: str, day: date) ->
 def expected_runs(workflow: str, day: date) -> int:
     """그 날 예정된 실행 수를 낸다.
 
-    휴장이면 0 이다. cron 은 요일만 알고 휴장을 모르므로 여기서 가른다.
+    **요일로만 센다. 휴장 판정을 두지 않는다.** 실제 횟수는 워크플로 실행 이력을
+    세는데, 휴장이어도 워크플로는 돌고 조용히 끝나며 성공으로 집계된다. 예정에만
+    휴장을 반영하면 토요일과 공휴일마다 숫자가 어긋난다.
+
+    휴장이었는지는 점검 줄이 아니라 **알림이 왔는지로** 안다.
 
     Args:
         workflow: 워크플로 파일 이름.
         day: 판정할 날짜.
 
     Returns:
-        예정된 실행 수.
+        예정된 실행 수. 모르는 워크플로면 0.
     """
+    weekday = day.weekday()
+
     if workflow == WORKFLOW_USDKRW:
-        return 1 if day.weekday() == 0 else 0
-
-    per_day = RUNS_PER_TRADING_DAY.get(workflow, 0)
+        return 1 if weekday == _WEEKLY_ALERT_WEEKDAY else 0
     if workflow == WORKFLOW_REVERSE_KR:
-        return per_day if is_kr_trading_day(day) else 0
-    return per_day if is_us_trading_day(day) else 0
+        return _KR_RUNS_PER_DAY if weekday in _KR_ALERT_WEEKDAYS else 0
+    if workflow in (WORKFLOW_BUFFER_ZONE, WORKFLOW_REVERSE_US):
+        return 1 if weekday in _US_ALERT_WEEKDAYS else 0
+    return 0
 
 
-def _fraction(label: str, workflow: str, days: Sequence[date], count_runs: RunCounter) -> str:
-    """워크플로 하나의 실행 수를 `label 성공/예정` 으로 적는다.
+@dataclass(frozen=True)
+class RunReport:
+    """워크플로 하나를 재어 본 결과.
+
+    Attributes:
+        text: 화면에 쓸 문자열. 예정보다 적거나 조회가 실패하면 강조가 붙는다.
+        lookup_failed: 실행 이력 조회 자체가 실패했는지. 실행이 모자란 것과 다르다.
+    """
+
+    text: str
+    lookup_failed: bool
+
+
+def measure_runs(label: str, workflow: str, days: Sequence[date], count_runs: RunCounter) -> RunReport:
+    """워크플로 하나를 재서 `label 성공/예정` 으로 적는다.
+
+    **예정보다 적게 돌았으면 강조한다.** 알림이 빠진 날을 숫자만으로는 알아차릴 수 없다.
+
+    조회가 실패해도 예외를 올리지 않는다. 그 워크플로만 실패로 적고 나머지 숫자는 살린다 —
+    한 덩어리로 뭉개면 무엇이 실패했는지 알 수 없다.
 
     Args:
-        label: 화면에 쓸 이름.
+        label: 화면에 쓸 이름. 비우면 숫자만 적는다.
         workflow: 워크플로 파일 이름.
         days: 볼 날짜들.
         count_runs: 실행 수를 세는 함수.
 
     Returns:
-        `label 성공/예정` 형태.
+        잰 결과.
     """
     expected = sum(expected_runs(workflow, day) for day in days)
-    actual = sum(count_runs(workflow, day) for day in days)
-    return f"{label} {actual}/{expected}"
+
+    try:
+        actual = sum(count_runs(workflow, day) for day in days)
+    except Exception as exc:
+        logger.warning(f"{workflow} 실행 이력을 읽지 못했습니다: {exc}")
+        return RunReport(alert(f"{label} {LOOKUP_FAILED}".strip()), lookup_failed=True)
+
+    text = f"{label} {actual}/{expected}".strip()
+    return RunReport(alert(text) if actual < expected else text, lookup_failed=False)
 
 
 def _detail(entries: Sequence[tuple[str, str]], days: Sequence[date], count_runs: RunCounter) -> str:
     """점검 상세를 만든다.
 
     조회가 실패해도 예외를 밖으로 내보내지 않는다. 점검 때문에 본 알림이 막히면 안 된다.
+    **전부 실패했으면 워크플로마다 같은 말을 되풀이하지 않고 한 번만 적는다.**
 
     Args:
         entries: (화면 이름, 워크플로 파일 이름) 목록.
@@ -147,13 +182,12 @@ def _detail(entries: Sequence[tuple[str, str]], days: Sequence[date], count_runs
         count_runs: 실행 수를 세는 함수.
 
     Returns:
-        상세 문자열. 조회가 실패하면 그 사실을 적는다.
+        상세 문자열.
     """
-    try:
-        return " · ".join(_fraction(label, workflow, days, count_runs) for label, workflow in entries)
-    except Exception as exc:
-        logger.warning(f"점검 조회에 실패해 본문만 보냅니다: {exc}")
-        return LOOKUP_FAILED
+    reports = [measure_runs(label, workflow, days, count_runs) for label, workflow in entries]
+    if reports and all(report.lookup_failed for report in reports):
+        return alert(LOOKUP_FAILED)
+    return " · ".join(report.text for report in reports)
 
 
 def daily_health(previous_day: date, count_runs: RunCounter) -> HealthLine:
