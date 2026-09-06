@@ -24,6 +24,12 @@ concurrency:
 
 jobs:
   run:
+    # 재사용 워크플로는 호출자의 권한을 낮출 수만 있고 올릴 수 없다.
+    # 여기서 주지 않으면 _run_alert.yml 의 actions: read 요구가 거부돼
+    # 실행이 시작조차 하지 못한다 (startup_failure).
+    permissions:
+      actions: read
+      contents: read
     uses: ./.github/workflows/_run_alert.yml
     with:
       alert: reverse_rank_kr

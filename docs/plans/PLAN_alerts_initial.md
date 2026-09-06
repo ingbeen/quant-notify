@@ -21,7 +21,7 @@
 ---
 
 **작성일**: 2026-09-05 18:32
-**마지막 업데이트**: 2026-09-06 09:05
+**마지막 업데이트**: 2026-09-06 09:20
 **관련 범위**: `src/notify/` 전체, `.github/workflows/`, `state/`, `tests/`
 **관련 문서**: 루트 `CLAUDE.md`, [docs/DESIGN.md](../DESIGN.md), [reference/README.md](../../reference/README.md), `.claude/rules/python.md`
 
@@ -638,5 +638,19 @@ Phase 1·4 에서 재고 `docs/research/데이터소스_실측.md` 에 남긴다
   비교를 한 번 거쳐 언제나 boolean 이 되게 했다
 - 2026-09-06 09:05: **cron-job.org 는 `inputs` 를 보내지 않으므로 기본값 `false` 로 발송된다.**
   `dry_run` 을 더해도 정시 트리거는 그대로다
+- 2026-09-06 09:20: **첫 워크플로 실행이 넷 다 `startup_failure` 로 죽었다.** 잡이 하나도
+  만들어지지 않아 REST API 로는 이유를 알 수 없었다(로그도 잡도 없다). 웹 annotation 에
+  답이 있었다 — **`The nested job 'run' is requesting 'actions: read', but is only allowed
+  'actions: none'`**
+- 2026-09-06 09:20: **원인은 재사용 워크플로의 권한 상한이다.** 재사용 워크플로는 호출자의
+  권한을 **낮출 수만 있고 올릴 수 없다.** `_run_alert.yml` 이 `actions: read` 를 요구하는데
+  호출자 넷에 `permissions` 가 없어 저장소 기본값(`actions: none`)을 받았다.
+  → 호출자 넷의 잡에 `permissions: actions: read · contents: read` 를 명시했다
+- 2026-09-06 09:20: **저장소 설정을 바꾸지 않고 워크플로 파일에서 잡았다.**
+  `Settings → Actions → General → Workflow permissions` 를 넓히는 길도 있었지만,
+  그것은 이 저장소의 **모든** 워크플로에 걸린다. 파일에 적으면 그 잡 하나에만 걸리고,
+  왜 필요한지가 코드 옆에 남는다
+- 2026-09-06 09:20: **`dry_run: true` 로 부른 것이라 텔레그램 발송은 없었다.** dispatch 는
+  넷 다 204 로 접수됐으므로 **PAT 와 트리거 경로 자체는 정상**이다
 
 ---
