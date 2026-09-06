@@ -1,15 +1,20 @@
-"""yfinance 로 미국 상장 종목의 종가를 받는다.
+"""yfinance 로 시세를 받는다. 일봉 종가와 장중 현재가 둘 다 여기서 받는다.
 
 **조정 종가를 쓴다.** 배당과 분할을 반영한 값이라야 백테스트가 낸 이동평균과 같은
 값이 나온다. 원시 종가로 계산하면 200일 이동평균이 0.1% 남짓 어긋나는데,
 근접도를 소수 둘째 자리까지 내므로 그 차이가 화면에 그대로 보인다.
 
 기본값에 기대지 않고 `auto_adjust` 를 명시한다. 라이브러리 판이 바뀌면 기본값도 바뀐다.
+
+**한국 종목도 여기서 받는다.** pykrx 를 쓰지 않는 이유는 일봉 종가가 이미 같은 값으로
+확인됐고(`docs/research/데이터소스_실측.md`), pykrx 는 가져오는 시점에 로그인하면서
+**계정 아이디를 표준출력에 직접 찍기** 때문이다. 퍼블릭 저장소는 Actions 로그가 공개다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 
 import pandas as pd
 import yfinance as yf
@@ -20,6 +25,10 @@ logger = get_logger(__name__)
 
 # 받아올 기간. 200일 이동평균에 필요한 거래일보다 넉넉하다
 DEFAULT_PERIOD = "1y"
+
+# 장중 조회 설정. 하루치 1분봉의 마지막 값이 현재가다
+INTRADAY_PERIOD = "1d"
+INTRADAY_INTERVAL = "1m"
 
 # 응답에서 읽을 컬럼
 _CLOSE_COLUMN = "Close"
@@ -95,3 +104,87 @@ def fetch_closes(tickers: Sequence[str], period: str = DEFAULT_PERIOD) -> dict[s
     counts = ", ".join(f"{ticker} {len(series)}행" for ticker, series in closes.items())
     logger.debug(f"조정 종가를 받았습니다 ({counts})")
     return closes
+
+
+def _index_date(stamp: object) -> date:
+    """시세 인덱스 값을 날짜로 바꾼다.
+
+    Args:
+        stamp: 인덱스 값.
+
+    Returns:
+        날짜.
+
+    Raises:
+        RuntimeError: 인덱스가 날짜도 시각도 아닐 때.
+    """
+    to_date = getattr(stamp, "date", None)
+    if callable(to_date):
+        converted = to_date()
+        if isinstance(converted, date):
+            return converted
+    if isinstance(stamp, date):
+        return stamp
+
+    raise RuntimeError(f"내부 불변조건 위반: 시세 인덱스가 날짜가 아닙니다: {stamp!r}")
+
+
+def previous_close(closes: pd.Series, today: date) -> float:
+    """오늘보다 앞선 마지막 종가를 고른다.
+
+    **장중에 일봉을 받으면 당일 미확정 봉이 섞여 온다.** 그것을 전일 종가로 쓰면
+    신호 가격이 통째로 어긋나는데, 알림 형태로는 정상으로 보여 알아차릴 수 없다.
+
+    Args:
+        closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
+        today: 오늘 날짜.
+
+    Returns:
+        오늘 이전의 마지막 종가.
+
+    Raises:
+        ValueError: 오늘 이전 종가가 하나도 없을 때.
+    """
+    earlier = closes[[_index_date(stamp) < today for stamp in closes.index]]
+    if earlier.empty:
+        raise ValueError(f"{today} 이전의 종가가 없어 전일 종가를 정할 수 없습니다.")
+
+    return float(earlier.iloc[-1])
+
+
+def fetch_intraday_price(ticker: str) -> float:
+    """장중 현재가를 받는다.
+
+    하루치 1분봉의 마지막 값을 쓴다. **일봉과 같은 조정 기준으로 받는다** —
+    전일 종가와 견주어 등락률을 내므로 기준이 갈리면 그 차이가 등락률에 섞인다.
+
+    Args:
+        ticker: 받을 종목.
+
+    Returns:
+        현재가.
+
+    Raises:
+        ValueError: 조회가 실패했거나 봉이 하나도 없을 때.
+    """
+    try:
+        frame = yf.download(
+            ticker,
+            period=INTRADAY_PERIOD,
+            interval=INTRADAY_INTERVAL,
+            auto_adjust=True,
+            progress=False,
+        )
+    except Exception as exc:
+        raise ValueError(f"[{ticker}] 장중 시세 조회에 실패했습니다: {exc}") from None
+
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        raise ValueError(f"[{ticker}] 장중 시세를 받지 못했습니다. 장이 열려 있는지 확인하세요.")
+
+    series = _extract_close(frame, ticker)
+    if series.empty:
+        raise ValueError(f"[{ticker}] 장중 시세가 비어 있습니다. 장이 열려 있는지 확인하세요.")
+
+    price = float(series.iloc[-1])
+    logger.debug(f"[{ticker}] 장중 현재가를 받았습니다 ({len(series)}봉, 마지막 {series.index[-1]})")
+    return price

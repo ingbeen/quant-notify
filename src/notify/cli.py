@@ -47,7 +47,7 @@ from notify.common_constants import (
 )
 from notify.data.calendar import is_kr_trading_day, is_us_trading_day
 from notify.data.ecos_client import fetch_usdkrw, load_api_key
-from notify.data.yfinance_client import fetch_closes
+from notify.data.yfinance_client import fetch_closes, fetch_intraday_price, previous_close
 from notify.notifier import telegram
 from notify.state.positions import load_positions
 from notify.state.reverse_rank import RankEntry, load_reverse_rank
@@ -230,8 +230,57 @@ def _weekly_slot(monday: date, counter) -> HealthLine:
     return HealthLine("최근 주간", format_day(monday), report.text)
 
 
+def _korea_prices(now: datetime) -> tuple[float, float] | None:
+    """한국 역방향이 볼 두 값을 받는다.
+
+    **장중 판정이다.** 오늘 현재가를 전일 종가와 견준다. 일봉에는 장중에 당일
+    미확정 봉이 섞여 오므로 전일 종가를 날짜로 골라낸다.
+
+    Args:
+        now: 실행 시각.
+
+    Returns:
+        (전일 종가, 현재가). 휴장이면 None.
+    """
+    if not is_kr_trading_day(now.date()):
+        logger.debug(f"{now.date()} 는 한국 휴장입니다.")
+        return None
+
+    closes = fetch_closes([YF_TICKER_KODEX])[YF_TICKER_KODEX]
+    return previous_close(closes, now.date()), fetch_intraday_price(YF_TICKER_KODEX)
+
+
+def _united_states_prices(now: datetime) -> tuple[float, float] | None:
+    """미국 역방향이 볼 두 값을 받는다.
+
+    **마감 뒤 판정이다.** 직전 미국 거래일의 확정 종가를 그 전날과 견준다.
+
+    Args:
+        now: 실행 시각.
+
+    Returns:
+        (전일 종가, 당일 종가). 휴장이면 None.
+
+    Raises:
+        ValueError: 종가가 두 개보다 적을 때.
+    """
+    target = now.date() - timedelta(days=1)
+    if not is_us_trading_day(target):
+        logger.debug(f"{target} 은 미국 휴장이라 새 종가가 없습니다.")
+        return None
+
+    closes = fetch_closes([TICKER_QQQ])[TICKER_QQQ]
+    if len(closes) < 2:
+        raise ValueError("전일 종가와 당일 종가가 모두 필요합니다.")
+
+    return float(closes.iloc[-2]), float(closes.iloc[-1])
+
+
 def _run_reverse(market: Market, now: datetime) -> str | None:
     """역방향 알림 문구를 만든다.
+
+    **두 시장은 보는 값이 다르다** — 한국은 그날 장중 현재가를, 미국은 직전 거래일
+    종가를 본다. 판정과 문구는 같다.
 
     Args:
         market: 시장.
@@ -239,28 +288,19 @@ def _run_reverse(market: Market, now: datetime) -> str | None:
 
     Returns:
         보낼 문구. 휴장이거나 신호가 멀면 None.
-
-    Raises:
-        ValueError: 한국 장중 시세 소스가 아직 정해지지 않았을 때.
     """
     if market is Market.KR:
-        if not is_kr_trading_day(now.date()):
-            logger.debug(f"{now.date()} 는 한국 휴장입니다.")
-            return None
-        raise ValueError("한국 장중 시세 소스가 아직 정해지지 않았습니다. 장중 실측을 먼저 마치세요.")
+        prices = _korea_prices(now)
+        symbol, rank_key = SYMBOL_KODEX, RANK_KEY_KODEX
+    else:
+        prices = _united_states_prices(now)
+        symbol, rank_key = TICKER_QQQ, RANK_KEY_QQQ
 
-    target = now.date() - timedelta(days=1)
-    if not is_us_trading_day(target):
-        logger.debug(f"{target} 은 미국 휴장이라 새 종가가 없습니다.")
+    if prices is None:
         return None
 
-    entry = _load_rank(RANK_KEY_QQQ)
-    closes = fetch_closes([TICKER_QQQ])[TICKER_QQQ]
-    if len(closes) < 2:
-        raise ValueError("전일 종가와 당일 종가가 모두 필요합니다.")
-
-    prev_close = float(closes.iloc[-2])
-    current = float(closes.iloc[-1])
+    prev_close, current = prices
+    entry = _load_rank(rank_key)
     judgement = judge(prev_close=prev_close, current_price=current, thresholds=entry.thresholds)
     if judgement.direction is None:
         logger.debug("신호가 여유 밖이라 보내지 않습니다.")
@@ -268,7 +308,7 @@ def _run_reverse(market: Market, now: datetime) -> str | None:
 
     return render_reverse(
         market=market,
-        symbol=TICKER_QQQ,
+        symbol=symbol,
         judgement=judgement,
         prices=signal_prices(prev_close, entry.thresholds),
         thresholds=entry.thresholds,

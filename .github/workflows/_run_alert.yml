@@ -18,6 +18,11 @@ on:
         description: 실행할 알림 이름
         required: true
         type: string
+      dry_run:
+        description: 참이면 보내지 않고 로그로만 확인한다
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   run:
@@ -42,11 +47,12 @@ jobs:
       - name: 의존성 설치
         run: poetry install --without dev
 
+      # dry-run 이면 문구를 로그로만 찍고 보내지 않는다. 발송 전 확인용이다
       - name: 알림 실행
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ECOS_API_KEY: ${{ secrets.ECOS_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: poetry run python -m notify ${{ inputs.alert }}
+        run: poetry run python -m notify ${{ inputs.alert }}${{ inputs.dry_run && ' --dry-run' || '' }}
 

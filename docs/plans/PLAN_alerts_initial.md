@@ -21,7 +21,7 @@
 ---
 
 **작성일**: 2026-09-05 18:32
-**마지막 업데이트**: 2026-09-06 08:37
+**마지막 업데이트**: 2026-09-06 09:05
 **관련 범위**: `src/notify/` 전체, `.github/workflows/`, `state/`, `tests/`
 **관련 문서**: 루트 `CLAUDE.md`, [docs/DESIGN.md](../DESIGN.md), [reference/README.md](../../reference/README.md), `.claude/rules/python.md`
 
@@ -101,7 +101,8 @@
 
 - `src/notify/common_constants.py` — 티커·경로·컬럼명·타임존
 - `src/notify/utils/logger.py`
-- `src/notify/data/` — `yfinance_client.py` · `pykrx_client.py` · `ecos_client.py` · `calendar.py`
+- `src/notify/data/` — `yfinance_client.py` · `ecos_client.py` · `calendar.py`
+  (**`pykrx_client.py` 는 만들지 않는다** — 장중 소스를 yfinance 로 정했다. Phase 1 참고)
 - `src/notify/state/` — `positions.py` · `reverse_rank.py`
 - `src/notify/alerts/` — `buffer_zone.py` · `reverse_rank.py` · `usdkrw.py` · `health.py`(점검 줄)
 - `src/notify/notifier/telegram.py`
@@ -157,16 +158,18 @@
 - [x] `common_constants.py` — 티커·MA 기간·여유 폭·타임존·경로. 매직넘버를 코드에 흩지 않는다
 - [x] `utils/logger.py` — `.claude/rules/python.md` 의 로깅 정책을 따른다
 - [x] `data/yfinance_client.py` — SPY·QQQ·GLD·TLT 1년치, QQQ 전일 종가
-- [ ] **`scripts/probe_intraday.py` 로 KODEX 200 장중 시세 소스를 실측한다**
-      — pykrx 와 yfinance `069500.KS` 를 같은 시각에 호출해 값과 지연을 비교하고,
-      결과를 `docs/research/데이터소스_실측.md` 에 남긴다
-- [ ] `data/pykrx_client.py` — 실측 결과로 고른 소스를 구현
-- [ ] **`KRX_ID`·`KRX_PW` 를 안전하게 쓴다** — 자격증명은 등록돼 있다(로컬 `.env` · GitHub 시크릿).
-      pykrx 는 **가져오는 시점에** 로그인하고 환경 변수만 읽으므로 import 전에 올려야 하며,
-      **로그인에 성공하면 `로그인 ID: <아이디>` 를 표준출력에 직접 찍는다.**
-      라이브러리가 stdout 에 쓰는 것이라 이 저장소의 로거 마스킹이 걸리지 않고,
-      퍼블릭 저장소는 Actions 로그가 공개다. **그 출력을 눌러야 한다**
-      (`contextlib.redirect_stdout` 등으로 import·로그인 구간을 감싼다)
+- [x] **장중 시세 소스를 yfinance `069500.KS` 로 정하고 구현했다** (2026-09-06).
+      사용자 지시가 「구현해두고 월요일에 테스트」였다 — 실측 뒤 구현이 아니라 순서를 뒤집었다.
+      `yfinance_client` 에 `fetch_intraday_price` 와 `previous_close` 를 더하고
+      `cli._korea_prices` 를 붙였다. 근거는 `docs/research/데이터소스_실측.md` §5
+- [x] **`data/pykrx_client.py` 를 만들지 않기로 했다.** 일봉 종가가 pykrx 와 이미 같고
+      (실측 §4.4), **pykrx 는 로그인 시 계정 아이디를 표준출력에 찍어** 퍼블릭 Actions
+      로그에 그대로 남는다. `redirect_stdout` 은 라이브러리 동작에 기대는 방어다
+- [x] **`KRX_ID`·`KRX_PW` 가 불필요해졌다** — pykrx 를 안 쓰므로 시크릿 두 개와
+      「stdout 을 눌러야 한다」 문제가 함께 사라졌다. 등록된 시크릿은 지워도 된다
+- [ ] **월요일 장중에 실물로 검증한다** — 1분봉이 **14:59 에서 끊기는 것**이 지연인지
+      제공 범위 제한인지 가린다 (실측 §5.2). 지연이면 14:30 판정이 과거 값을 보게 된다.
+      `scripts/probe_intraday.py` 가 pykrx 와 나란히 재도록 돼 있다
 - [x] `data/ecos_client.py` — USDKRW 10년치. **인증키가 URL 경로에 들어가므로 마스킹 없이 로깅하지 않는다**
       (예외 메시지에도 URL 이 담기므로 함께 막는다)
 - [x] `data/calendar.py` — 미국·한국 휴장 판정. 휴장이면 알림이 조용히 종료된다
@@ -317,15 +320,15 @@
       ② **AI 가 실행하려면 수단이 필요하다** — 이 PC 에 `gh` CLI 가 없고 `.env` 에 GitHub 토큰도 없다.
       `gh` 를 설치하거나, **cron-job.org 에 쓸 fine-grained PAT 를 발급해 `.env` 에 넣으면**
       REST API 로 dispatch 하고 실행 로그까지 확인할 수 있다. 아니면 사용자가 웹에서 `Run workflow` 를 누른다
-- [ ] **`workflow_dispatch` 에 테스트 파라미터를 넣고 분기시킨다.**
+- [x] **`workflow_dispatch` 에 테스트 파라미터를 넣고 분기시킨다.**
       `inputs.dry_run`(boolean, 기본 `false`)을 받아 `_run_alert.yml` 로 넘기고,
       참이면 `python -m notify <알림> --dry-run` 으로 실행해 **보내지 않고 로그로만** 확인한다.
       워크플로 넷 모두에 같은 입력을 둔다
-- [ ] 재사용 워크플로(`_run_alert.yml`)에 `dry_run` 입력을 추가하고 실행 명령을 분기한다
+- [x] 재사용 워크플로(`_run_alert.yml`)에 `dry_run` 입력을 추가하고 실행 명령을 분기한다
 - [ ] **dry-run 으로 한 번, 실제 발송으로 한 번** 돌려 양쪽을 확인한다
 - [ ] `점검` 줄이 워크플로 안에서 채워지는지 확인한다 — 로컬에서는 `GITHUB_TOKEN` 이 없어
       `조회 실패` 로 나왔다. Actions 에서는 토큰이 자동 제공되므로 **숫자가 나와야 한다**
-- [ ] [docs/COMMANDS.md](../COMMANDS.md) 의 「워크플로 수동 실행」 절에 테스트 파라미터 사용법을 적는다
+- [x] [docs/COMMANDS.md](../COMMANDS.md) 의 「워크플로 수동 실행」 절에 테스트 파라미터 사용법을 적는다
 
 ---
 
@@ -611,5 +614,29 @@ Phase 1·4 에서 재고 `docs/research/데이터소스_실측.md` 에 남긴다
   `cli.py` 가 `TRADING_WEEK_OFFSET` 과 `RUN_WEEK_OFFSET` 두 상수로 가른다
 - 2026-09-06 08:35: **테스트 142개 그린.** `usdkrw` dry-run 으로 실데이터 확인도 마쳤다.
   나머지 셋은 일요일이라 휴장으로 침묵한다 — **문구 대조는 Phase 6 의 워크플로 실행에서 마친다**
+- 2026-09-06 08:55: **장중 시세 소스를 yfinance 로 확정하고 구현했다** (사용자 지시).
+  「실측 먼저, 구현 나중」으로 잡아 둔 순서가 **뒤집혔다** — 어차피 실측 스크립트도 코드이고,
+  구현해두면 월요일에 실물로 한 번에 검증된다. pykrx 를 기각한 결정적 이유는 값이 아니라
+  **로그인 시 계정 아이디를 stdout 에 찍는 것**이다. 퍼블릭 저장소는 Actions 로그가 공개다
+- 2026-09-06 08:55: **장중에는 일봉에 당일 미확정 봉이 섞여 온다.** 전일 종가를 `iloc[-1]` 로
+  잡으면 그 값을 쓰게 되고, 신호 가격이 통째로 어긋나면서 **알림은 정상으로 보인다.**
+  `previous_close` 가 날짜로 고르게 하고 테스트 5개로 묶었다. **147개 그린**
+- 2026-09-06 08:55: **1분봉이 14:59 에서 끊기는 것을 관측했다** (정규장은 15:30).
+  일봉 종가와 355원(0.34%) 차이가 난다. 판정 시각 12:00·14:30 은 아직 그 앞이라 걸리지
+  않지만, **지연인지 제공 범위 제한인지 월요일에 가려야 한다** (실측 §5.2)
+- 2026-09-06 08:55: **PAT 만료를 잘못 말했던 것을 바로잡는다.** fine-grained PAT 는
+  2024-10 부터 **개인 저장소면 무기한(no expiration) 이 가능하다.** 366일 상한은 조직·기업
+  정책이다. 만료는 이 시스템에서 **조용한 죽음**이므로(cron 이 401 을 받으면 알림도 점검도
+  오지 않는다) 무기한을 권한다 — 권한이 Actions 하나·저장소 하나라 유출 피해가 제한적이다
+- 2026-09-06 09:05: **PAT 가 동작한다** — 워크플로 목록과 실행 이력 조회가 둘 다 200 이다.
+  `Actions: Read and write` 하나로 dispatch(write)와 점검 줄의 이력 조회(read)가 함께 된다.
+  워크플로 5개 전부 `active`, 실행 이력 0건
+- 2026-09-06 09:05: **`dry_run` 입력을 넷 모두에 넣었다.** 재사용 워크플로가
+  `inputs.dry_run && ' --dry-run' || ''` 로 명령을 분기한다. 알림 쪽에서는
+  **`${{ inputs.dry_run == true }}` 로 넘긴다** — `workflow_dispatch` 의 boolean 입력을
+  재사용 워크플로의 boolean 입력으로 그대로 넘기면 문자열로 평가되는 사례가 알려져 있어,
+  비교를 한 번 거쳐 언제나 boolean 이 되게 했다
+- 2026-09-06 09:05: **cron-job.org 는 `inputs` 를 보내지 않으므로 기본값 `false` 로 발송된다.**
+  `dry_run` 을 더해도 정시 트리거는 그대로다
 
 ---

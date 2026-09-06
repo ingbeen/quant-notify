@@ -62,16 +62,77 @@ poetry run python -m notify buffer_zone
 
 ---
 
+## cron-job.org 정시 트리거 설정
+
+워크플로는 `workflow_dispatch` 뿐이라 **누가 불러주지 않으면 돌지 않습니다.**
+cron-job.org 에 아래 잡 다섯 개를 만듭니다. 요일 근거는 [DESIGN.md](DESIGN.md) 6.4 절에 있습니다.
+
+**공통 설정** — 잡마다 URL 의 워크플로 파일명만 다릅니다.
+
+```
+Method    POST
+URL       https://api.github.com/repos/ingbeen/quant-notify/actions/workflows/<파일명>/dispatches
+Headers   Authorization: Bearer <PAT>
+          Accept: application/vnd.github+json
+          X-GitHub-Api-Version: 2022-11-28
+Body      {"ref":"main"}
+Timezone  Asia/Seoul
+```
+
+| 잡 | 요일 | 시각 | 워크플로 파일 |
+| --- | --- | --- | --- |
+| 버퍼존 | 화~토 | 07:30 | `buffer_zone.yml` |
+| 역방향 US | 화~토 | 07:30 | `reverse_rank_us.yml` |
+| 역방향 KR | 월~금 | 12:00 | `reverse_rank_kr.yml` |
+| 역방향 KR | 월~금 | 14:30 | `reverse_rank_kr.yml` |
+| 주간 | 월 | 07:30 | `usdkrw.yml` |
+
+**실패 알림 이메일을 켭니다.** PAT 가 만료되거나 무효가 되면 cron 이 401 을 받고 워크플로가
+아예 돌지 않는데, **알림이 안 오니 점검 줄도 오지 않습니다.** 이 메일이 그것을 잡는 유일한
+장치입니다. cron-job.org 는 15회 연속 실패하면 잡을 끄고 알려줍니다.
+
+### PAT 발급
+
+https://github.com/settings/personal-access-tokens/new 에서 만듭니다.
+
+| 항목 | 값 |
+| --- | --- |
+| Expiration | `No expiration` — 만료는 위 「조용한 죽음」을 부릅니다 |
+| Repository access | `Only select repositories` → `ingbeen/quant-notify` |
+| Permissions | **Actions: Read and write** 하나만. dispatch(write)와 점검 줄의 이력 조회(read)를 겸합니다 |
+
+토큰은 **생성 직후 한 번만** 보입니다. cron-job.org 헤더와 로컬 `.env` 의 `GITHUB_TOKEN` 에 넣습니다.
+
+---
+
 ## 워크플로 수동 실행
 
 정시 트리거가 실패했거나 원인 확인 후 다시 돌릴 때 씁니다.
 
 GitHub 웹 → **Actions** → 워크플로 선택 → **Run workflow**
 
-CLI 를 쓴다면:
+### 보내지 않고 확인하기 (`dry_run`)
+
+워크플로 넷 모두 **`dry_run` 입력**을 받습니다. 참이면 문구를 **실행 로그에만 찍고
+텔레그램으로 보내지 않습니다.** 웹에서는 `Run workflow` 를 누를 때 나오는 체크박스입니다.
+
+REST API 로 부를 때는 본문에 넣습니다. 값은 **문자열** 이어야 합니다.
 
 ```bash
-gh workflow run buffer_zone.yml
+curl -X POST \
+  -H "Authorization: Bearer $GITHUB_TOKEN" \
+  -H "Accept: application/vnd.github+json" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/ingbeen/quant-notify/actions/workflows/buffer_zone.yml/dispatches \
+  -d '{"ref":"main","inputs":{"dry_run":"true"}}'
+```
+
+**cron-job.org 는 `inputs` 를 보내지 않습니다.** 기본값이 `false` 라 그대로 발송됩니다.
+
+`gh` CLI 를 쓴다면:
+
+```bash
+gh workflow run buffer_zone.yml -f dry_run=true
 gh workflow run reverse_rank_kr.yml
 gh workflow run reverse_rank_us.yml
 gh workflow run usdkrw.yml
