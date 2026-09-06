@@ -46,7 +46,7 @@ from notify.common_constants import (
     USDKRW_WINDOW_YEARS,
 )
 from notify.data.calendar import is_kr_trading_day, is_us_trading_day
-from notify.data.ecos_client import fetch_usdkrw, load_api_key
+from notify.data.ecos_client import ENV_ECOS_API_KEY, fetch_usdkrw
 from notify.data.yfinance_client import fetch_closes, fetch_intraday_price, previous_close
 from notify.notifier import telegram
 from notify.state.positions import load_positions
@@ -365,7 +365,10 @@ def run_usdkrw(now: datetime) -> str:
     """
     end = now.date()
     start = end - timedelta(days=USDKRW_LOOKBACK_DAYS)
-    series = fetch_usdkrw(load_api_key(ENV_FILE_PATH), ECOS_USDKRW_STAT_CODE, ECOS_USDKRW_ITEM_CODE, start, end)
+    # 다른 설정과 같은 길로 읽는다. `.env` 를 직접 열면 워크플로에서 못 찾는다 —
+    # Actions 에는 그 파일이 없고 시크릿이 환경 변수로 들어온다
+    api_key = _config(ENV_ECOS_API_KEY)
+    series = fetch_usdkrw(api_key, ECOS_USDKRW_STAT_CODE, ECOS_USDKRW_ITEM_CODE, start, end)
 
     as_of = series.index[-1]
     current = float(series.iloc[-1])
