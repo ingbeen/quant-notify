@@ -37,10 +37,7 @@ def is_trading_day(calendar_code: str, day: date) -> bool:
     first = calendar.first_session.date()
     last = calendar.last_session.date()
     if not first <= day <= last:
-        raise ValueError(
-            f"{calendar_code} 달력이 {day} 를 다루지 않습니다 (범위 {first} ~ {last}). "
-            f"exchange-calendars 를 갱신하세요."
-        )
+        raise ValueError(f"{calendar_code} 달력이 {day} 를 다루지 않습니다 (범위 {first} ~ {last}). " f"exchange-calendars 를 갱신하세요.")
 
     return bool(calendar.is_session(day.isoformat()))
 
@@ -88,8 +85,7 @@ def previous_trading_day(calendar_code: str, day: date) -> date:
     last = calendar.last_session.date()
     if not first < day <= last:
         raise ValueError(
-            f"{calendar_code} 달력이 {day} 의 직전 거래일을 다루지 않습니다 (범위 {first} ~ {last}). "
-            f"exchange-calendars 를 갱신하세요."
+            f"{calendar_code} 달력이 {day} 의 직전 거래일을 다루지 않습니다 (범위 {first} ~ {last}). " f"exchange-calendars 를 갱신하세요."
         )
 
     return calendar.previous_session(day.isoformat()).date()

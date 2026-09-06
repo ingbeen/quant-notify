@@ -41,18 +41,14 @@ class TestConfig:
 
         assert cli._config("ECOS_API_KEY") == "KEY-FROM-ENVIRONMENT"
 
-    def test_missing_required_value_raises(
-        self, monkeypatch: pytest.MonkeyPatch, without_env_file: None
-    ) -> None:
+    def test_missing_required_value_raises(self, monkeypatch: pytest.MonkeyPatch, without_env_file: None) -> None:
         """필수인데 어디에도 없으면 예외다. 빈 값으로 조회에 들어가지 않는다."""
         monkeypatch.delenv("ECOS_API_KEY", raising=False)
 
         with pytest.raises(ValueError, match="ECOS_API_KEY"):
             cli._config("ECOS_API_KEY")
 
-    def test_optional_value_returns_empty(
-        self, monkeypatch: pytest.MonkeyPatch, without_env_file: None
-    ) -> None:
+    def test_optional_value_returns_empty(self, monkeypatch: pytest.MonkeyPatch, without_env_file: None) -> None:
         """필수가 아니면 빈 문자열을 돌려준다. 점검 줄이 이 경로를 쓴다."""
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
@@ -66,9 +62,7 @@ class TestUsdKrwReadsTheKeyLikeEverythingElse:
     읽는지를 통합 지점에서 확인한다.
     """
 
-    def test_takes_the_key_from_environment(
-        self, monkeypatch: pytest.MonkeyPatch, without_env_file: None
-    ) -> None:
+    def test_takes_the_key_from_environment(self, monkeypatch: pytest.MonkeyPatch, without_env_file: None) -> None:
         """`.env` 없이 환경 변수만으로 인증키가 조회 함수까지 닿는다."""
         monkeypatch.setenv("ECOS_API_KEY", "KEY-FROM-ENVIRONMENT")
         seen: dict[str, str] = {}

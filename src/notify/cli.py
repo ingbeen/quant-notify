@@ -27,6 +27,7 @@ from notify.alerts.formatting import format_day
 from notify.alerts.health import (
     WORKFLOW_USDKRW,
     HealthLine,
+    RunCounter,
     count_success_runs,
     daily_health,
     measure_runs,
@@ -216,7 +217,7 @@ def _last_monday(today: date) -> date:
     return today - timedelta(days=offset if offset else 7)
 
 
-def _weekly_slot(monday: date, counter) -> HealthLine:
+def _weekly_slot(monday: date, counter: RunCounter) -> HealthLine:
     """주간 알림이 지난 월요일에 돌았는지 적는다.
 
     Args:
@@ -387,22 +388,16 @@ def run_usdkrw(now: datetime) -> str:
     reverses = [
         usdkrw.ReverseBlock(
             SYMBOL_KODEX,
-            _weekly_extreme_line(
-                RANK_KEY_KODEX, _to_date_index(closes[YF_TICKER_KODEX]), week_start, trading_week_end
-            ),
+            _weekly_extreme_line(RANK_KEY_KODEX, _to_date_index(closes[YF_TICKER_KODEX]), week_start, trading_week_end),
         ),
         usdkrw.ReverseBlock(
             TICKER_QQQ,
-            _weekly_extreme_line(
-                RANK_KEY_QQQ, _to_date_index(closes[TICKER_QQQ]), week_start, trading_week_end
-            ),
+            _weekly_extreme_line(RANK_KEY_QQQ, _to_date_index(closes[TICKER_QQQ]), week_start, trading_week_end),
         ),
     ]
 
     health = weekly_health(week_start, week_start + timedelta(days=RUN_WEEK_OFFSET), _health_counter())
-    return usdkrw.render(
-        sent_at=now, current=current, as_of=as_of, windows=windows, reverses=reverses, health=health
-    )
+    return usdkrw.render(sent_at=now, current=current, as_of=as_of, windows=windows, reverses=reverses, health=health)
 
 
 def _to_date_index(series: pd.Series) -> pd.Series:

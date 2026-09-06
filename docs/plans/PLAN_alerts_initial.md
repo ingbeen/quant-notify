@@ -21,7 +21,7 @@
 ---
 
 **작성일**: 2026-09-05 18:32
-**마지막 업데이트**: 2026-09-06 09:50
+**마지막 업데이트**: 2026-09-06 16:59
 **관련 범위**: `src/notify/` 전체, `.github/workflows/`, `state/`, `tests/`
 **관련 문서**: 루트 `CLAUDE.md`, [docs/DESIGN.md](../DESIGN.md), [reference/README.md](../../reference/README.md), `.claude/rules/python.md`
 
@@ -42,10 +42,10 @@
 
 ## 1) 목표(Goal)
 
-- [ ] 목표 1: **알림 4종을 구현한다** — `buffer_zone` · `reverse_rank_kr` · `reverse_rank_us` · `usdkrw`
-- [ ] 목표 2: **사람이 쓰는 파일 2종을 로딩·검증한다** — `state/positions.toml` · `state/reverse_rank.toml`
-- [ ] 목표 3: **cron-job.org 가 부를 워크플로 4개를 만든다** — `workflow_dispatch` 전용, `schedule` 없음
-- [ ] 목표 4: **실패와 침묵을 구분 가능하게 한다** — 실패 알림 + `점검` 줄
+- [x] 목표 1: **알림 4종을 구현한다** — `buffer_zone` · `reverse_rank_kr` · `reverse_rank_us` · `usdkrw`
+- [x] 목표 2: **사람이 쓰는 파일 2종을 로딩·검증한다** — `state/positions.toml` · `state/reverse_rank.toml`
+- [x] 목표 3: **cron-job.org 가 부를 워크플로 4개를 만든다** — `workflow_dispatch` 전용, `schedule` 없음
+- [x] 목표 4: **실패와 침묵을 구분 가능하게 한다** — 실패 알림 + `점검` 줄
 
 ## 2) 비목표(Non-Goals)
 
@@ -83,12 +83,12 @@
 > Done은 "서술"이 아니라 "체크리스트 상태"로만 판단합니다. (정의/예외는 `/impl-plan` 스킬)
 
 - [ ] 알림 4종이 **dry-run 으로 [docs/DESIGN.md](../DESIGN.md) §4 의 문구와 일치하는 출력**을 낸다
-- [ ] `state/` 파일 2종의 로딩·스키마 검증이 동작하고, 파일이 없어도 알림이 발송된다
-- [ ] 워크플로 4개가 `workflow_dispatch` 로 실행되고 실패 시 실패 알림이 나간다
-- [ ] 회귀/신규 테스트 추가
-- [ ] `poetry run python validate_project.py` 통과 (failed=0, skipped=0; passed/failed/skipped 수 기록)
-- [ ] 자동 포맷 적용 완료 (마지막 Phase에서 실행)
-- [ ] 필요한 문서 업데이트(`docs/COMMANDS.md` / `docs/DESIGN.md` — 각각 변경 여부 명시)
+- [x] `state/` 파일 2종의 로딩·스키마 검증이 동작하고, 파일이 없어도 알림이 발송된다
+- [x] 워크플로 4개가 `workflow_dispatch` 로 실행되고 실패 시 실패 알림이 나간다
+- [x] 회귀/신규 테스트 추가
+- [x] `poetry run python validate_project.py` 통과 (passed=151, failed=0, skipped=0)
+- [x] 자동 포맷 적용 완료 (마지막 Phase에서 실행)
+- [x] 필요한 문서 업데이트(`docs/COMMANDS.md` / `docs/DESIGN.md` — 둘 다 **변경 있음**)
 - [x] 근거 승격 완료 — 이 계획서를 지금 삭제해도 잃을 정보가 없다
       (데이터 소스 실측 결과 → `docs/research/`, 설계 변경 → [docs/DESIGN.md](../DESIGN.md))
 - [ ] plan 체크박스 최신화(Phase/DoD/Validation 모두 반영)
@@ -328,9 +328,13 @@
       참이면 `python -m notify <알림> --dry-run` 으로 실행해 **보내지 않고 로그로만** 확인한다.
       워크플로 넷 모두에 같은 입력을 둔다
 - [x] 재사용 워크플로(`_run_alert.yml`)에 `dry_run` 입력을 추가하고 실행 명령을 분기한다
-- [ ] **dry-run 으로 한 번, 실제 발송으로 한 번** 돌려 양쪽을 확인한다
-- [ ] `점검` 줄이 워크플로 안에서 채워지는지 확인한다 — **주말이라 아직 못 봤다.** 로컬에서는 `GITHUB_TOKEN` 이 없어
-      `조회 실패` 로 나왔다. Actions 에서는 토큰이 자동 제공되므로 **숫자가 나와야 한다**
+- [x] **dry-run 으로 한 번, 실제 발송으로 한 번** 돌려 양쪽을 확인했다 (2026-09-06).
+      dry-run 은 로그로만 찍혔고, 실제 발송은 텔레그램까지 나갔다
+- [x] `점검` 줄이 워크플로 안에서 채워지는지 확인했다 (2026-09-06 09:26).
+      `지난주 08-31 (월) ~ 09-05 (토)` · `버퍼존 0/5 · 역방향 KR 0/10 · US 0/5` 가 나왔고
+      셋 다 빨간 점이 붙었다. **0 이 정답이다** — 지난주에 워크플로가 한 번도 돌지 않았다.
+      이 한 줄이 세 가지를 함께 보였다: 조회가 실제로 되고, **예정보다 적을 때 강조가 붙고**,
+      구간이 **토요일까지**다
 - [x] [docs/COMMANDS.md](../COMMANDS.md) 의 「워크플로 수동 실행」 절에 테스트 파라미터 사용법을 적는다
 
 ---
@@ -345,14 +349,14 @@
       §8 에 **pykrx 기각 근거**도 넣었다
 - [x] `docs/research/데이터소스_실측.md` 완성 — 근거 승격 목적지.
       §5 에 **장중 소스 결정과 1분봉 관측**을 더했다
-- [ ] 자동 포맷 적용 — `poetry run black .`
+- [x] 자동 포맷 적용 — `poetry run black .`
 - [ ] 변경 기능 및 전체 플로우 최종 검증
 - [ ] DoD 체크리스트 최종 업데이트 및 체크 완료
 - [ ] 전체 Phase 체크리스트 최종 업데이트 및 상태 확정
 
 **Validation**:
 
-- [ ] `poetry run python validate_project.py` (passed=\_\_, failed=\_\_, skipped=\_\_)
+- [x] `poetry run python validate_project.py` (passed=151, failed=0, skipped=0)
 
 #### Commit Messages (Final candidates) — 5개 중 1개 선택
 
@@ -692,5 +696,33 @@ Phase 1·4 에서 재고 `docs/research/데이터소스_실측.md` 에 남긴다
   둘 다 이번에 실제로 걸린 것이다
 - 2026-09-06 09:50: 이제 계획서를 지워도 잃을 정보가 없다. 남은 미완료는 전부
   **외부 조건**(평일 장중 · 푸시 · 사용자 확인)이나 **마지막 Phase 검증**이다
+- 2026-09-06 09:30: **`usdkrw` 워크플로가 통과했다.** ECOS 키를 `_config` 로 읽게 고친 뒤다.
+  환율 2,697행(2015-09-09 ~ 2026-09-04)을 받고 문구를 정상으로 냈다
+- 2026-09-06 09:30: **점검 줄이 처음으로 숫자를 냈다** — `버퍼존 0/5 · 역방향 KR 0/10 · US 0/5`,
+  셋 다 강조. **0 이 맞다.** cron 을 아직 걸지 않아 지난주 실행이 없다.
+  로컬에서는 토큰이 없어 `이력 조회 실패` 로만 보이던 경로가 Actions 에서 확인됐다
+- 2026-09-06 09:37: **`usdkrw` 를 워크플로에서 실제로 발송했다** (사용자 승인). dry-run 과 실발송
+  양쪽이 확인돼 **Phase 6 의 실행 검증이 끝났다.** 남은 것은 cron 잡 등록(사용자 작업)과
+  Phase 1 의 장중 실측뿐이다
+- 2026-09-06 13:58: **GitHub API 버전을 `2026-03-10` 으로 올렸다.** cron-job.org 의 TEST RUN 응답에
+  `Deprecation: 2026-03-10` · `Sunset: 2028-03-10` 이 붙어 있었다 — 쓰던 `2022-11-28` 이
+  **이미 deprecated** 였다. 2028년에 끊기면 cron 이 조용히 멈춘다
+- 2026-09-06 13:58: **새 버전이 오히려 낫다.** 응답이 `204 No Content` 에서 **`200 OK` + 본문**으로 바뀌어
+  `workflow_run_id` 와 `html_url` 을 돌려준다. 예전에는 dispatch 뒤 실행 목록을 뒤져 찾아야 했다.
+  dispatch 응답을 다룰 때 **200 과 204 를 모두 성공으로 봐야 한다**
+- 2026-09-06 16:59: **cron 잡 5개 등록 완료** (사용자). 다음 실행 시각이 크론탭과 정확히 맞는 것을 확인했다 —
+  미국장 둘은 화요일, 역방향 KR 둘과 주간은 내일(월). **내일 아침부터 실제 운영이 시작된다**
+- 2026-09-06 16:59: **품질 검증을 앞당겨 돌렸다.** 규약은 마지막 Phase 로 못박고 있으나, cron 이 걸려
+  **운영이 시작되기 전에 확인하는 것이 그 규약의 목적**이라고 판단했다. Phase 1 의 장중 실측이
+  남아 상태는 In Progress 그대로다
+- 2026-09-06 16:59: **품질 검증에서 오류 3건이 나왔고 전부 기존 코드였다.** 마지막 Phase 에서만 돌리는
+  규약 때문에 이제야 드러났다.
+  ① `state/reverse_rank.py` — `isinstance(value, (int, float))` 를 `int | float` 로 (Ruff UP038)
+  ② `cli._weekly_slot` — `counter` 파라미터 타입 누락 (`RunCounter` 를 붙였다)
+  ③ `yfinance_client._extract_close` — **`isinstance(series, pd.Series)` 검사를 뺐다.**
+  PyRight 가 「타입상 항상 참」이라 판정했다. `frame[column]` 은 문자열이나 튜플로 접근하므로
+  Series 가 확정이고, 컬럼이 중복될 경로가 없다. 형태가 어긋나면 뒤의 `.dropna()` 에서
+  예외가 나 `cli.main` 이 실패 알림으로 잡는다 — **방어가 사라진 것이 아니라 자리를 옮겼다**
+- 2026-09-06 16:59: **Ruff · PyRight · Pytest 전부 통과** (passed=151, failed=0, skipped=0)
 
 ---

@@ -177,8 +177,7 @@ def _window_rows(windows: Sequence[WindowLine]) -> list[str]:
         줄 목록.
     """
     return [
-        f"{line.years}년 평균 {format_krw(line.mean_price)} 대비 {format_rate(line.deviation_rate, 1)}"
-        for line in windows
+        f"{line.years}년 평균 {format_krw(line.mean_price)} 대비 {format_rate(line.deviation_rate, 1)}" for line in windows
     ]
 
 
@@ -235,10 +234,7 @@ def _reverse_rows(blocks: Sequence[ReverseBlock]) -> list[str]:
             rows.append("")
         rows.append(bold(f"역방향 · {block.symbol}"))
         for line in block.lines:
-            rows.append(
-                f"{line.direction} 1위 {format_rate(line.rate_1st)}"
-                f" / 20위 {format_rate(line.rate_20th)}"
-            )
+            rows.append(f"{line.direction} 1위 {format_rate(line.rate_1st)}" f" / 20위 {format_rate(line.rate_20th)}")
             rows.append(_extreme_row(line))
     return rows
 

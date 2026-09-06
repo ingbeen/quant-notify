@@ -111,9 +111,7 @@ class TestComparisonDirection:
 
         assert result.state is not SignalState.HIT
 
-    def test_exact_equality_counts_as_hit(
-        self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
-    ) -> None:
+    def test_exact_equality_counts_as_hit(self, kodex_prev_close: float, kodex_thresholds: dict[str, float]) -> None:
         """신호 가격에 정확히 닿으면 동률도 도달로 센다."""
         thresholds = RankThresholds(**kodex_thresholds)
         prices = signal_prices(kodex_prev_close, thresholds)
@@ -184,9 +182,7 @@ class TestMarginAndSilence:
         assert result.state is SignalState.NEAR
         assert result.direction is Direction.SURGE
 
-    def test_margin_boundary_is_inclusive(
-        self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
-    ) -> None:
+    def test_margin_boundary_is_inclusive(self, kodex_prev_close: float, kodex_thresholds: dict[str, float]) -> None:
         """여유 경계에 정확히 걸치면 근접에 포함한다."""
         thresholds = RankThresholds(**kodex_thresholds)
         near = signal_prices(kodex_prev_close, thresholds, REVERSE_MARGIN_RATE)
@@ -214,9 +210,7 @@ class TestMarginAndSilence:
 
         assert result.state is SignalState.SILENT
 
-    def test_plunge_side_has_its_own_margin(
-        self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
-    ) -> None:
+    def test_plunge_side_has_its_own_margin(self, kodex_prev_close: float, kodex_thresholds: dict[str, float]) -> None:
         """폭락 쪽 여유는 임계보다 위쪽으로 잡힌다 — 부호를 따라 방향이 뒤집힌다."""
         result = _judge(
             kodex_prev_close,

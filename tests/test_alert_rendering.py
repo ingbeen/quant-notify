@@ -128,11 +128,7 @@ class TestReverseRankUnitedStates:
         )
 
         assert text == (
-            f"{RED_DOT} <b>역방향 · QQQ · 폭등 발생</b>\n"
-            "09-04 (금) 07:30\n"
-            "\n"
-            "종가 $619.50 +7.80%\n"
-            "신호 $617.34 +7.42%"
+            f"{RED_DOT} <b>역방향 · QQQ · 폭등 발생</b>\n" "09-04 (금) 07:30\n" "\n" "종가 $619.50 +7.80%\n" "신호 $617.34 +7.42%"
         )
 
     def test_uses_occurred_not_reached(self) -> None:
@@ -350,10 +346,7 @@ class TestFailure:
         )
 
         assert text == (
-            f"{RED_DOT} <b>실패 · buffer_zone</b>\n"
-            "09-04 (금) 07:31\n"
-            "\n"
-            "RuntimeError: yfinance 조회 실패 — QQQ"
+            f"{RED_DOT} <b>실패 · buffer_zone</b>\n" "09-04 (금) 07:31\n" "\n" "RuntimeError: yfinance 조회 실패 — QQQ"
         )
 
     def test_carries_no_guidance(self) -> None:

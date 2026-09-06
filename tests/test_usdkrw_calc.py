@@ -41,9 +41,7 @@ class TestMeanDeviation:
 
     def test_ratio_against_window_mean(self) -> None:
         """평균대비는 현재를 창 평균으로 나눈 뒤 1 을 뺀 비율이다."""
-        assert mean_deviation(current=1384.80, window_closes=_flat(1462.0, 246)) == pytest.approx(
-            1384.80 / 1462.0 - 1
-        )
+        assert mean_deviation(current=1384.80, window_closes=_flat(1462.0, 246)) == pytest.approx(1384.80 / 1462.0 - 1)
 
     def test_matches_the_recorded_calculation(self) -> None:
         """실측 검산과 같은 값이 나온다.

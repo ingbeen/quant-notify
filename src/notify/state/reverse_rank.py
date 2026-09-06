@@ -61,15 +61,12 @@ def _require_rate(raw: dict[str, Any], field: str, symbol: str) -> float:
         raise ValueError(f"[{symbol}] '{field}' 항목이 없습니다. 순위 등락률 파일에 추가하세요.")
 
     value = raw[field]
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"[{symbol}] '{field}' 는 숫자여야 합니다. 지금 값: {value!r}")
 
     rate = float(value)
     if abs(rate) >= MAX_DAILY_CHANGE_RATE:
-        raise ValueError(
-            f"[{symbol}] '{field}' 값 {rate} 이 하루 등락률로 너무 큽니다. "
-            f"퍼센트가 아니라 비율로 적으세요 (+6.10% 는 0.0610)."
-        )
+        raise ValueError(f"[{symbol}] '{field}' 값 {rate} 이 하루 등락률로 너무 큽니다. " f"퍼센트가 아니라 비율로 적으세요 (+6.10% 는 0.0610).")
     return rate
 
 
@@ -120,13 +117,11 @@ def _build_thresholds(raw: dict[str, Any], symbol: str) -> RankThresholds:
 
     if rates["surge_1st"] < rates["surge_20th"]:
         raise ValueError(
-            f"[{symbol}] 폭등 1위({rates['surge_1st']})가 20위({rates['surge_20th']})보다 작습니다. "
-            f"순위가 뒤바뀌었는지 확인하세요."
+            f"[{symbol}] 폭등 1위({rates['surge_1st']})가 20위({rates['surge_20th']})보다 작습니다. " f"순위가 뒤바뀌었는지 확인하세요."
         )
     if rates["plunge_1st"] > rates["plunge_20th"]:
         raise ValueError(
-            f"[{symbol}] 폭락 1위({rates['plunge_1st']})가 20위({rates['plunge_20th']})보다 큽니다. "
-            f"순위가 뒤바뀌었는지 확인하세요."
+            f"[{symbol}] 폭락 1위({rates['plunge_1st']})가 20위({rates['plunge_20th']})보다 큽니다. " f"순위가 뒤바뀌었는지 확인하세요."
         )
 
     return RankThresholds(**rates)

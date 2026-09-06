@@ -74,18 +74,25 @@ Method    POST
 URL       https://api.github.com/repos/ingbeen/quant-notify/actions/workflows/<파일명>/dispatches
 Headers   Authorization: Bearer <PAT>
           Accept: application/vnd.github+json
-          X-GitHub-Api-Version: 2022-11-28
+          X-GitHub-Api-Version: 2026-03-10
+          Content-Type: application/json
 Body      {"ref":"main"}
 Timezone  Asia/Seoul
 ```
 
-| 잡 | 요일 | 시각 | 워크플로 파일 |
+**URL 끝의 `/dispatches` 가 「실행시켜라」입니다.** 빼면 워크플로 정보를 조회하는 주소가 됩니다.
+
+| 잡 | 크론탭 | 시각 (KST) | 워크플로 파일 |
 | --- | --- | --- | --- |
-| 버퍼존 | 화~토 | 07:30 | `buffer_zone.yml` |
-| 역방향 US | 화~토 | 07:30 | `reverse_rank_us.yml` |
-| 역방향 KR | 월~금 | 12:00 | `reverse_rank_kr.yml` |
-| 역방향 KR | 월~금 | 14:30 | `reverse_rank_kr.yml` |
-| 주간 | 월 | 07:30 | `usdkrw.yml` |
+| 버퍼존 | `30 7 * * 2-6` | 화~토 07:30 | `buffer_zone.yml` |
+| 역방향 US | `30 7 * * 2-6` | 화~토 07:30 | `reverse_rank_us.yml` |
+| 역방향 KR | `0 12 * * 1-5` | 월~금 12:00 | `reverse_rank_kr.yml` |
+| 역방향 KR | `30 14 * * 1-5` | 월~금 14:30 | `reverse_rank_kr.yml` |
+| 주간 | `30 7 * * 1` | 월 07:30 | `usdkrw.yml` |
+
+**API 버전은 `2026-03-10` 을 씁니다.** `2022-11-28` 은 2026-03-10 부로 deprecated 되었고
+2028-03-10 에 끊깁니다. 새 버전은 응답도 낫습니다 — `204 No Content` 대신 **`200 OK` 와 함께
+`workflow_run_id`·`html_url` 을 돌려주어** 방금 만든 실행을 바로 찾을 수 있습니다.
 
 **실패 알림 이메일을 켭니다.** PAT 가 만료되거나 무효가 되면 cron 이 401 을 받고 워크플로가
 아예 돌지 않는데, **알림이 안 오니 점검 줄도 오지 않습니다.** 이 메일이 그것을 잡는 유일한
@@ -122,7 +129,7 @@ REST API 로 부를 때는 본문에 넣습니다. 값은 **문자열** 이어�
 curl -X POST \
   -H "Authorization: Bearer $GITHUB_TOKEN" \
   -H "Accept: application/vnd.github+json" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
+  -H "X-GitHub-Api-Version: 2026-03-10" \
   https://api.github.com/repos/ingbeen/quant-notify/actions/workflows/buffer_zone.yml/dispatches \
   -d '{"ref":"main","inputs":{"dry_run":"true"}}'
 ```

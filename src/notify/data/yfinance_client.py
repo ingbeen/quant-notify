@@ -56,9 +56,6 @@ def _extract_close(frame: pd.DataFrame, ticker: str) -> pd.Series:
     except KeyError:
         raise ValueError(f"[{ticker}] 종가가 응답에 없습니다.") from None
 
-    if not isinstance(series, pd.Series):
-        raise ValueError(f"[{ticker}] 종가 형식이 예상과 다릅니다.")
-
     return series.dropna().astype("float64")
 
 

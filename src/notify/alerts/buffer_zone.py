@@ -131,9 +131,7 @@ def _holding_rows(holdings: Sequence[HoldingLine]) -> list[str]:
     Returns:
         줄 목록.
     """
-    return [
-        f"{line.ticker} {line.quantity:,}주 · {format_weight(line.weight_ratio)}" for line in holdings
-    ]
+    return [f"{line.ticker} {line.quantity:,}주 · {format_weight(line.weight_ratio)}" for line in holdings]
 
 
 def _health_rows(health: Sequence[HealthLine]) -> list[str]:

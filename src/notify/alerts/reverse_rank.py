@@ -109,9 +109,7 @@ def judge(
     change_rate = current_price / prev_close - 1
 
     def result(state: SignalState, direction: Direction | None) -> Judgement:
-        return Judgement(
-            state=state, direction=direction, change_rate=change_rate, current_price=current_price
-        )
+        return Judgement(state=state, direction=direction, change_rate=change_rate, current_price=current_price)
 
     if current_price >= hit.surge:
         return result(SignalState.HIT, Direction.SURGE)
@@ -191,9 +189,7 @@ def render(
         raise RuntimeError("내부 불변조건 위반: 방향이 없는데 문구를 만들려 했습니다.")
 
     # 연 5~8회만 오는 알림이라 온 것 자체가 사건이다. 제목을 강조한다
-    heading = alert(
-        f"역방향 · {symbol} · {_DIRECTION_WORD[judgement.direction]} {_state_word(market, judgement.state)}"
-    )
+    heading = alert(f"역방향 · {symbol} · {_DIRECTION_WORD[judgement.direction]} {_state_word(market, judgement.state)}")
 
     money = format_krw if market is Market.KR else format_usd
     is_surge = judgement.direction is Direction.SURGE
