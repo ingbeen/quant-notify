@@ -7,10 +7,13 @@ GitHub Actions 에서 돌고, **매일 갱신되는 누적 상태를 갖지 않�
 
 | 알림 | 시각 (KST) | 내용 |
 | --- | --- | --- |
-| `buffer_zone` | 매 거래일 아침 | SPY · QQQ · GLD · TLT 의 200일 이동평균 근접도 + 보유 종목과 비중 |
-| `reverse_rank_kr` | 평일 12:00 · 14:30 | KODEX 200 이 역대 상위 20위 등락률에 접근하면 알림. **멀면 침묵** |
-| `reverse_rank_us` | 매 거래일 아침 | QQQ 에 대해 같은 판정. **멀면 침묵** |
+| `buffer_zone` | 화~토 아침 | SPY · QQQ · GLD · TLT 의 200일 이동평균 근접도 + 보유 종목과 비중 |
+| `reverse_rank_kr` | 월~금 12:00 · 14:30 | KODEX 200 이 역대 상위 20위 등락률에 접근하면 알림. **멀면 침묵** |
+| `reverse_rank_us` | 화~토 아침 | QQQ 에 대해 같은 판정. **멀면 침묵** |
 | `usdkrw` | 월요일 아침 | 원달러가 1·3·5·10년 평균 대비 어디인지 + 지난주 역방향 요약 |
+
+미국장 알림이 화~토인 것은 한국 아침에 **전날 미국 종가**를 보기 때문입니다 — 금요일 종가는
+토요일 아침에 보고, 일·월에는 볼 새 종가가 없습니다.
 
 ## 왜 이렇게 생겼나
 
@@ -37,3 +40,5 @@ state/             사람이 손으로 쓰는 파일 (보유 종목, 순위 등�
 - 시크릿 셋 — `TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` · `ECOS_API_KEY`
 - 정시 트리거 — cron-job.org 가 GitHub `workflow_dispatch` 를 호출합니다
   (GitHub 의 `schedule` 은 중앙값 64분 밀려 장중 알림에 쓸 수 없습니다)
+- 그 호출에 쓸 **fine-grained PAT** — 이 저장소의 `Actions: Read and write` 하나면 됩니다.
+  발급과 cron 설정은 [docs/COMMANDS.md](docs/COMMANDS.md) 에 있습니다
