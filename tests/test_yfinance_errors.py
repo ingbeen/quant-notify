@@ -18,7 +18,7 @@ import pytest
 from yfinance.exceptions import YFPricesMissingError, YFRateLimitError
 
 from notify.data import yfinance_client
-from notify.data.yfinance_client import fetch_closes, fetch_intraday_price, previous_close
+from notify.data.yfinance_client import close_on, fetch_closes, fetch_intraday_price
 
 KODEX = "069500.KS"
 QQQ = "QQQ"
@@ -181,45 +181,45 @@ class TestFetchIntradayPrice:
         _install(monkeypatch, {KODEX: YFRateLimitError()})
 
         with pytest.raises(ValueError, match="YFRateLimitError"):
-            fetch_intraday_price(KODEX)
+            fetch_intraday_price(KODEX, date(2026, 9, 7))
 
     def test_takes_the_last_bar(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """마지막 봉을 현재가로 쓴다."""
         days = [date(2026, 9, 7), date(2026, 9, 7)]
         _install(monkeypatch, {KODEX: _frame([107000.0, 107500.0], days)})
 
-        assert fetch_intraday_price(KODEX) == 107500.0
+        assert fetch_intraday_price(KODEX, date(2026, 9, 7)) == 107500.0
 
     def test_empty_frame_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """봉이 하나도 없으면 실패로 돌린다."""
         _install(monkeypatch, {KODEX: _frame([], [])})
 
         with pytest.raises(ValueError, match=r"069500\.KS"):
-            fetch_intraday_price(KODEX)
+            fetch_intraday_price(KODEX, date(2026, 9, 7))
 
 
-class TestPreviousCloseOnTzAwareIndex:
-    """tz 가 붙은 인덱스에서도 전일 종가를 날짜로 고른다.
+class TestCloseOnTzAwareIndex:
+    """tz 가 붙은 인덱스에서도 종가를 날짜로 고른다.
 
     `Ticker.history` 는 `yf.download` 와 달리 거래소 현지 tz 를 인덱스에 남긴다.
     날짜 비교가 여기서 어긋나면 신호 가격이 통째로 틀리는데 알림 형태로는 정상으로 보인다.
     """
 
-    def test_drops_today_bar_on_seoul_index(self) -> None:
-        """장중에 섞여 온 당일 봉을 버린다. 인덱스가 `Asia/Seoul` 이어도 같다."""
+    def test_reads_a_seoul_index(self) -> None:
+        """인덱스가 `Asia/Seoul` 이어도 요청한 날짜를 집는다."""
         frame = _frame([107615.0, 108000.0], [date(2026, 9, 4), date(2026, 9, 7)])
 
-        assert previous_close(frame["Close"], date(2026, 9, 7)) == 107615.0
+        assert close_on(frame["Close"], date(2026, 9, 4), KODEX) == 107615.0
 
-    def test_drops_today_bar_on_new_york_index(self) -> None:
+    def test_reads_a_new_york_index(self) -> None:
         """미국 종목의 `America/New_York` 인덱스에서도 같다."""
         frame = _frame([566.30, 570.00], [date(2026, 9, 3), date(2026, 9, 4)], tz="America/New_York")
 
-        assert previous_close(frame["Close"], date(2026, 9, 4)) == 566.30
+        assert close_on(frame["Close"], date(2026, 9, 3), QQQ) == 566.30
 
-    def test_raises_when_every_bar_is_today(self) -> None:
-        """오늘 이전 종가가 없으면 멈춘다. 당일 봉을 전일 종가로 대신 쓰지 않는다."""
+    def test_raises_when_only_another_day_is_present(self) -> None:
+        """요청한 날짜가 없으면 멈춘다. 옆 날짜 봉으로 대신 쓰지 않는다."""
         frame = _frame([108000.0], [date(2026, 9, 7)])
 
         with pytest.raises(ValueError):
-            previous_close(frame["Close"], date(2026, 9, 7))
+            close_on(frame["Close"], date(2026, 9, 4), KODEX)

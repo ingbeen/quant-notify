@@ -9,6 +9,9 @@
   한국 기준 어제가 미국 거래일이 아니면 새 종가가 없어 조용히 끝낸다.
 - 한국 역방향은 **그날 장중**에 돌므로 오늘이 한국 거래일이어야 한다.
 - 주간 알림은 요일로만 돌며 환율 기준일은 **받은 자료의 마지막 날**을 쓴다.
+
+일일 알림 셋은 판정에 쓸 값을 **날짜로 집는다.** 그 날짜의 값이 없으면 멈춘다 —
+계열의 끝을 위치로 집으면 하루 전 값으로 조용히 판정하게 된다 (docs/DESIGN.md 7.4 절).
 """
 
 from __future__ import annotations
@@ -46,9 +49,14 @@ from notify.common_constants import (
     TZ_KST,
     USDKRW_WINDOW_YEARS,
 )
-from notify.data.calendar import is_kr_trading_day, is_us_trading_day
+from notify.data.calendar import (
+    is_kr_trading_day,
+    is_us_trading_day,
+    previous_kr_trading_day,
+    previous_us_trading_day,
+)
 from notify.data.ecos_client import ENV_ECOS_API_KEY, fetch_usdkrw
-from notify.data.yfinance_client import fetch_closes, fetch_intraday_price, previous_close
+from notify.data.yfinance_client import close_on, fetch_closes, fetch_intraday_price
 from notify.notifier import telegram
 from notify.state.positions import load_positions
 from notify.state.reverse_rank import RankEntry, load_reverse_rank
@@ -178,11 +186,12 @@ def run_buffer_zone(now: datetime) -> str | None:
     positions = load_positions(POSITIONS_PATH)
     tickers = list(dict.fromkeys([*BUFFER_ZONE_TICKERS, *(p.ticker for p in positions)]))
     closes = fetch_closes(tickers)
+    prices = {ticker: close_on(series, target, ticker) for ticker, series in closes.items()}
 
     proximities = [
         buffer_zone.ProximityLine(
             ticker=ticker,
-            proximity_rate=buffer_zone.ma_proximity(float(closes[ticker].iloc[-1]), buffer_zone.sma(closes[ticker])),
+            proximity_rate=buffer_zone.ma_proximity(prices[ticker], buffer_zone.sma(closes[ticker])),
         )
         for ticker in BUFFER_ZONE_TICKERS
     ]
@@ -191,7 +200,7 @@ def run_buffer_zone(now: datetime) -> str | None:
     if positions:
         weights = buffer_zone.position_weights(
             quantities={p.ticker: p.quantity for p in positions},
-            prices={ticker: float(series.iloc[-1]) for ticker, series in closes.items()},
+            prices=prices,
         )
         holdings = [buffer_zone.HoldingLine(p.ticker, p.quantity, weights[p.ticker]) for p in positions]
 
@@ -248,7 +257,8 @@ def _korea_prices(now: datetime) -> tuple[float, float] | None:
         return None
 
     closes = fetch_closes([YF_TICKER_KODEX])[YF_TICKER_KODEX]
-    return previous_close(closes, now.date()), fetch_intraday_price(YF_TICKER_KODEX)
+    previous = close_on(closes, previous_kr_trading_day(now.date()), YF_TICKER_KODEX)
+    return previous, fetch_intraday_price(YF_TICKER_KODEX, now.date())
 
 
 def _united_states_prices(now: datetime) -> tuple[float, float] | None:
@@ -263,7 +273,7 @@ def _united_states_prices(now: datetime) -> tuple[float, float] | None:
         (전일 종가, 당일 종가). 휴장이면 None.
 
     Raises:
-        ValueError: 종가가 두 개보다 적을 때.
+        ValueError: 두 거래일 중 하나라도 종가를 받지 못했을 때.
     """
     target = now.date() - timedelta(days=1)
     if not is_us_trading_day(target):
@@ -271,10 +281,8 @@ def _united_states_prices(now: datetime) -> tuple[float, float] | None:
         return None
 
     closes = fetch_closes([TICKER_QQQ])[TICKER_QQQ]
-    if len(closes) < 2:
-        raise ValueError("전일 종가와 당일 종가가 모두 필요합니다.")
-
-    return float(closes.iloc[-2]), float(closes.iloc[-1])
+    previous = close_on(closes, previous_us_trading_day(target), TICKER_QQQ)
+    return previous, close_on(closes, target, TICKER_QQQ)
 
 
 def _run_reverse(market: Market, now: datetime) -> str | None:

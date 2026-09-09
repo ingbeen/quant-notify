@@ -142,49 +142,65 @@ def _index_date(stamp: object) -> date:
     raise RuntimeError(f"내부 불변조건 위반: 시세 인덱스가 날짜가 아닙니다: {stamp!r}")
 
 
-def previous_close(closes: pd.Series, today: date) -> float:
-    """오늘보다 앞선 마지막 종가를 고른다.
+def close_on(closes: pd.Series, day: date, ticker: str) -> float:
+    """그 날짜의 종가를 고른다.
 
-    **장중에 일봉을 받으면 당일 미확정 봉이 섞여 온다.** 그것을 전일 종가로 쓰면
-    신호 가격이 통째로 어긋나는데, 알림 형태로는 정상으로 보여 알아차릴 수 없다.
+    **위치가 아니라 날짜로 고른다.** 이유가 둘이다.
 
+    하나는 yfinance 가 거래일 행을 주면서 종가만 비워 보내는 일이 있다는 것이다
+    (2026-09-09 오전 실측). 빈 값은 `_extract_close` 가 떨궈 자취가 남지 않으므로,
+    남은 계열의 끝을 그대로 쓰면 하루 전 종가로 판정하게 된다.
+
+    다른 하나는 장중에 일봉을 받으면 **당일 미확정 봉이 마지막에 섞여 온다**는 것이다.
+
+    둘 다 신호 가격을 통째로 어긋나게 하는데 알림 형태로는 정상으로 보인다.
     인덱스에는 거래소 현지 시간대가 붙어 오므로 날짜로 바꿔 견준다.
 
     Args:
         closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
-        today: 오늘 날짜.
+        day: 고를 날짜.
+        ticker: 종목. 실패 문구에 쓴다.
 
     Returns:
-        오늘 이전의 마지막 종가.
+        그 날짜의 종가.
 
     Raises:
-        ValueError: 오늘 이전 종가가 하나도 없을 때.
+        ValueError: 그 날짜의 종가가 없을 때.
     """
-    earlier = closes[[_index_date(stamp) < today for stamp in closes.index]]
-    if earlier.empty:
-        raise ValueError(f"{today} 이전의 종가가 없어 전일 종가를 정할 수 없습니다.")
+    matched = closes[[_index_date(stamp) == day for stamp in closes.index]]
+    if matched.empty:
+        latest = f"마지막 종가일 {_index_date(closes.index[-1])}" if not closes.empty else "받은 종가 없음"
+        raise ValueError(f"[{ticker}] {day} 종가를 받지 못했습니다 ({latest}). 조회를 다시 실행하세요.")
 
-    return float(earlier.iloc[-1])
+    return float(matched.iloc[-1])
 
 
-def fetch_intraday_price(ticker: str) -> float:
+def fetch_intraday_price(ticker: str, today: date) -> float:
     """장중 현재가를 받는다.
 
     하루치 1분봉의 마지막 값을 쓴다. **일봉과 같은 조정 기준으로 받는다** —
     전일 종가와 견주어 등락률을 내므로 기준이 갈리면 그 차이가 등락률에 섞인다.
 
+    **마지막 봉이 오늘 것인지 본다.** 어제 봉을 현재가로 쓰면 전일 종가와 엉뚱한 짝이 되어
+    등락률이 통째로 어긋난다. 1분봉은 20분 남짓 지연되지만 날짜는 같으므로 이 검사에 걸리지 않는다.
+
     Args:
         ticker: 받을 종목.
+        today: 오늘 날짜.
 
     Returns:
         현재가.
 
     Raises:
-        ValueError: 조회가 실패했거나 봉이 하나도 없을 때.
+        ValueError: 조회가 실패했거나, 봉이 하나도 없거나, 마지막 봉이 오늘 것이 아닐 때.
     """
     series = _extract_close(_history(ticker, INTRADAY_PERIOD, INTRADAY_INTERVAL), ticker)
     if series.empty:
         raise ValueError(f"[{ticker}] 장중 시세가 비어 있습니다. 장이 열려 있는지 확인하세요.")
+
+    last_day = _index_date(series.index[-1])
+    if last_day != today:
+        raise ValueError(f"[{ticker}] 장중 시세의 마지막 봉이 {last_day} 입니다. {today} 시세가 아니라 판정에 쓸 수 없습니다.")
 
     price = float(series.iloc[-1])
     logger.debug(f"[{ticker}] 장중 현재가를 받았습니다 ({len(series)}봉, 마지막 {series.index[-1]})")
