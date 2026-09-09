@@ -229,8 +229,8 @@ class TestBufferZoneNeedsTheTargetClose:
     def _long_series(last_value: float) -> pd.Series:
         """이동평균을 낼 만큼 긴 계열을 만든다.
 
-        TUE 까지 200행이 100.0 이고 그 뒤 WED 한 행만 다르다. 판정이 TUE 를 고르는지
-        WED 를 고르는지가 근접도에서 확연히 갈린다.
+        TUE 까지 200행이고 그중 TUE 만 104.0, 나머지는 100.0 이다. 그 뒤 WED 한 행이 더 붙는다.
+        target(TUE)까지 잘라 쓰면 SMA 100.02 · 근접도 +3.98% 가 나오고, WED 가 섞이면 달라진다.
 
         Args:
             last_value: WED 행의 종가.
@@ -239,7 +239,7 @@ class TestBufferZoneNeedsTheTargetClose:
             201행 종가 계열.
         """
         days = [TUE - timedelta(days=offset) for offset in range(199, -1, -1)] + [WED]
-        return _series(days, [100.0] * 200 + [last_value])
+        return _series(days, [100.0] * 199 + [104.0, last_value])
 
     def _run(self, monkeypatch: pytest.MonkeyPatch, closes: dict[str, pd.Series]) -> str | None:
         """점검 줄 조회를 막고 이동평균 알림을 만든다.
@@ -256,7 +256,7 @@ class TestBufferZoneNeedsTheTargetClose:
         return cli.run_buffer_zone(_at(WED, 7, 30))
 
     def test_uses_the_target_close_not_the_last_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """뒤에 더 최근 행이 붙어 와도 target(09-08) 종가로 근접도를 낸다.
+        """뒤에 더 최근 행이 붙어 와도 target(09-08) 종가와 그 날까지의 창으로 근접도를 낸다.
 
         `iloc[-1]` 로 고르면 WED 값이 잡혀 근접도가 통째로 달라진다.
         """
@@ -265,8 +265,22 @@ class TestBufferZoneNeedsTheTargetClose:
         message = self._run(monkeypatch, closes)
 
         assert message is not None
-        assert "-0.15%" in message
-        assert "+29.81%" not in message
+        assert message.count("+3.98%") == len(cli.BUFFER_ZONE_TICKERS)
+
+    def test_moving_average_ignores_rows_after_the_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """이동평균 창도 target 에서 끊는다.
+
+        수동 재실행을 미국 장중(22:30~05:00 KST)에 하면 당일 미확정 봉이 섞여 온다.
+        그것이 200일 창에 들어가면 근접도가 0.1%p 남짓 어긋나는데, 소수 둘째 자리까지
+        내므로 화면에 그대로 보인다.
+        """
+        closes = {ticker: self._long_series(130.0) for ticker in cli.BUFFER_ZONE_TICKERS}
+        cut = {ticker: series.iloc[:-1] for ticker, series in closes.items()}
+
+        with_extra_row = self._run(monkeypatch, closes)
+        without_extra_row = self._run(monkeypatch, cut)
+
+        assert with_extra_row == without_extra_row
 
     def test_raises_when_a_ticker_is_missing_the_target_close(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """한 종목이라도 target 종가가 비면 멈춘다. 반쪽 알림을 내지 않는다."""

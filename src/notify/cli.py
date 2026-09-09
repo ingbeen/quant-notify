@@ -50,13 +50,17 @@ from notify.common_constants import (
     USDKRW_WINDOW_YEARS,
 )
 from notify.data.calendar import (
+    KR_CALENDAR,
+    US_CALENDAR,
     is_kr_trading_day,
     is_us_trading_day,
     previous_kr_trading_day,
+    previous_trading_day,
     previous_us_trading_day,
+    trading_days_between,
 )
 from notify.data.ecos_client import ENV_ECOS_API_KEY, fetch_usdkrw
-from notify.data.yfinance_client import close_on, fetch_closes, fetch_intraday_price
+from notify.data.yfinance_client import close_on, closes_through, fetch_closes, fetch_intraday_price
 from notify.notifier import telegram
 from notify.state.positions import load_positions
 from notify.state.reverse_rank import RankEntry, load_reverse_rank
@@ -186,12 +190,13 @@ def run_buffer_zone(now: datetime) -> str | None:
     positions = load_positions(POSITIONS_PATH)
     tickers = list(dict.fromkeys([*BUFFER_ZONE_TICKERS, *(p.ticker for p in positions)]))
     closes = fetch_closes(tickers)
-    prices = {ticker: close_on(series, target, ticker) for ticker, series in closes.items()}
+    through = {ticker: closes_through(series, target, ticker) for ticker, series in closes.items()}
+    prices = {ticker: float(series.iloc[-1]) for ticker, series in through.items()}
 
     proximities = [
         buffer_zone.ProximityLine(
             ticker=ticker,
-            proximity_rate=buffer_zone.ma_proximity(prices[ticker], buffer_zone.sma(closes[ticker])),
+            proximity_rate=buffer_zone.ma_proximity(prices[ticker], buffer_zone.sma(through[ticker])),
         )
         for ticker in BUFFER_ZONE_TICKERS
     ]
@@ -325,14 +330,42 @@ def _run_reverse(market: Market, now: datetime) -> str | None:
     )
 
 
-def _weekly_extreme_line(symbol_key: str, closes: pd.Series, start: date, end: date) -> list[usdkrw.ReverseLine]:
+def _weekly_changes(closes: pd.Series, ticker: str, calendar_code: str, start: date, end: date) -> pd.Series:
+    """지난주 각 거래일의 일간 등락률을 낸다.
+
+    **인접한 「행」이 아니라 인접한 「거래일」을 견준다.** `pct_change` 는 날짜를 보지 않으므로
+    계열에서 하루가 빠지면 그 자리가 이틀치 수익률이 되고, 뒤 날짜의 이름을 달고 나온다.
+    그 값이 1일 기준인 순위 등락률과 견줘져 알림에 실리므로 요약이 조용히 틀린다.
+
+    창의 첫 날은 **그 직전 거래일** 종가가 있어야 나온다. 그 날은 창 밖이라
+    행 수를 세는 검사로는 잡히지 않는다.
+
+    Args:
+        closes: 종가 계열.
+        ticker: 종목. 실패 문구에 쓴다.
+        calendar_code: 거래소 코드.
+        start: 지난주 시작일.
+        end: 지난주 종료일.
+
+    Returns:
+        날짜를 인덱스로 갖는 일간 등락률. 비율.
+
+    Raises:
+        ValueError: 거래일 종가나 그 직전 거래일 종가가 없을 때.
+    """
+    rates = {
+        day: close_on(closes, day, ticker) / close_on(closes, previous_trading_day(calendar_code, day), ticker) - 1
+        for day in trading_days_between(calendar_code, start, end)
+    }
+    return pd.Series(rates, dtype="float64")
+
+
+def _weekly_extreme_line(symbol_key: str, changes: pd.Series) -> list[usdkrw.ReverseLine]:
     """한 종목의 지난주 역방향 요약을 만든다.
 
     Args:
         symbol_key: 순위 등락률 파일의 종목 열쇠.
-        closes: 종가 계열.
-        start: 지난주 시작일.
-        end: 지난주 종료일.
+        changes: 지난주 일간 등락률.
 
     Returns:
         폭등·폭락 두 줄.
@@ -341,9 +374,7 @@ def _weekly_extreme_line(symbol_key: str, closes: pd.Series, start: date, end: d
         ValueError: 지난주 거래일이 없을 때.
     """
     entry = _load_rank(symbol_key)
-    changes = closes.pct_change().dropna()
-    window = changes[(changes.index >= start) & (changes.index <= end)]
-    extremes = usdkrw.weekly_extremes(window)
+    extremes = usdkrw.weekly_extremes(changes)
 
     return [
         usdkrw.ReverseLine(
@@ -396,28 +427,22 @@ def run_usdkrw(now: datetime) -> str:
     reverses = [
         usdkrw.ReverseBlock(
             SYMBOL_KODEX,
-            _weekly_extreme_line(RANK_KEY_KODEX, _to_date_index(closes[YF_TICKER_KODEX]), week_start, trading_week_end),
+            _weekly_extreme_line(
+                RANK_KEY_KODEX,
+                _weekly_changes(closes[YF_TICKER_KODEX], YF_TICKER_KODEX, KR_CALENDAR, week_start, trading_week_end),
+            ),
         ),
         usdkrw.ReverseBlock(
             TICKER_QQQ,
-            _weekly_extreme_line(RANK_KEY_QQQ, _to_date_index(closes[TICKER_QQQ]), week_start, trading_week_end),
+            _weekly_extreme_line(
+                RANK_KEY_QQQ,
+                _weekly_changes(closes[TICKER_QQQ], TICKER_QQQ, US_CALENDAR, week_start, trading_week_end),
+            ),
         ),
     ]
 
     health = weekly_health(week_start, week_start + timedelta(days=RUN_WEEK_OFFSET), _health_counter())
     return usdkrw.render(sent_at=now, current=current, as_of=as_of, windows=windows, reverses=reverses, health=health)
-
-
-def _to_date_index(series: pd.Series) -> pd.Series:
-    """시각이 붙은 인덱스를 날짜로 바꾼다.
-
-    Args:
-        series: 종가 계열.
-
-    Returns:
-        날짜를 인덱스로 갖는 계열.
-    """
-    return pd.Series(series.to_numpy(), index=pd.Index([stamp.date() for stamp in series.index]), dtype="float64")
 
 
 def build_message(alert: str, now: datetime) -> str | None:

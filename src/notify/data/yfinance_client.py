@@ -142,19 +142,42 @@ def _index_date(stamp: object) -> date:
     raise RuntimeError(f"내부 불변조건 위반: 시세 인덱스가 날짜가 아닙니다: {stamp!r}")
 
 
-def close_on(closes: pd.Series, day: date, ticker: str) -> float:
-    """그 날짜의 종가를 고른다.
+def closes_through(closes: pd.Series, day: date, ticker: str) -> pd.Series:
+    """그 날짜까지의 종가만 남긴다.
 
-    **위치가 아니라 날짜로 고른다.** 이유가 둘이다.
+    **위치가 아니라 날짜로 자른다.** 이유가 둘이다.
 
     하나는 yfinance 가 거래일 행을 주면서 종가만 비워 보내는 일이 있다는 것이다
     (2026-09-09 오전 실측). 빈 값은 `_extract_close` 가 떨궈 자취가 남지 않으므로,
     남은 계열의 끝을 그대로 쓰면 하루 전 종가로 판정하게 된다.
 
     다른 하나는 장중에 일봉을 받으면 **당일 미확정 봉이 마지막에 섞여 온다**는 것이다.
+    그것이 이동평균 창에 들어가면 근접도가 어긋난다.
 
-    둘 다 신호 가격을 통째로 어긋나게 하는데 알림 형태로는 정상으로 보인다.
+    둘 다 값을 조용히 틀리게 하는데 알림 형태로는 정상으로 보인다.
     인덱스에는 거래소 현지 시간대가 붙어 오므로 날짜로 바꿔 견준다.
+
+    Args:
+        closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
+        day: 마지막으로 담을 날짜.
+        ticker: 종목. 실패 문구에 쓴다.
+
+    Returns:
+        그 날짜까지의 종가. 마지막 값이 그 날짜의 종가다.
+
+    Raises:
+        ValueError: 그 날짜의 종가가 없을 때.
+    """
+    through = closes[[_index_date(stamp) <= day for stamp in closes.index]]
+    if through.empty or _index_date(through.index[-1]) != day:
+        latest = f"마지막 종가일 {_index_date(closes.index[-1])}" if not closes.empty else "받은 종가 없음"
+        raise ValueError(f"[{ticker}] {day} 종가를 받지 못했습니다 ({latest}). 조회를 다시 실행하세요.")
+
+    return through
+
+
+def close_on(closes: pd.Series, day: date, ticker: str) -> float:
+    """그 날짜의 종가를 고른다.
 
     Args:
         closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
@@ -167,12 +190,7 @@ def close_on(closes: pd.Series, day: date, ticker: str) -> float:
     Raises:
         ValueError: 그 날짜의 종가가 없을 때.
     """
-    matched = closes[[_index_date(stamp) == day for stamp in closes.index]]
-    if matched.empty:
-        latest = f"마지막 종가일 {_index_date(closes.index[-1])}" if not closes.empty else "받은 종가 없음"
-        raise ValueError(f"[{ticker}] {day} 종가를 받지 못했습니다 ({latest}). 조회를 다시 실행하세요.")
-
-    return float(matched.iloc[-1])
+    return float(closes_through(closes, day, ticker).iloc[-1])
 
 
 def fetch_intraday_price(ticker: str, today: date) -> float:

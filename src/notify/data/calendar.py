@@ -113,3 +113,32 @@ def previous_kr_trading_day(day: date) -> date:
         직전 거래일.
     """
     return previous_trading_day(KR_CALENDAR, day)
+
+
+def trading_days_between(calendar_code: str, start: date, end: date) -> list[date]:
+    """두 날짜 사이의 거래일을 모두 낸다. 양끝을 포함한다.
+
+    Args:
+        calendar_code: 거래소 코드.
+        start: 시작일.
+        end: 종료일.
+
+    Returns:
+        거래일 목록. 오래된 날이 앞에 온다.
+
+    Raises:
+        ValueError: 시작일이 종료일보다 늦거나, 달력이 다루는 범위를 벗어난 날짜일 때.
+    """
+    if start > end:
+        raise ValueError(f"시작일이 종료일보다 늦습니다: {start} ~ {end}")
+
+    calendar = xcals.get_calendar(calendar_code)
+
+    first = calendar.first_session.date()
+    last = calendar.last_session.date()
+    if not (first <= start <= last and first <= end <= last):
+        raise ValueError(
+            f"{calendar_code} 달력이 {start} ~ {end} 를 다루지 않습니다 (범위 {first} ~ {last}). " f"exchange-calendars 를 갱신하세요."
+        )
+
+    return [stamp.date() for stamp in calendar.sessions_in_range(start.isoformat(), end.isoformat())]
