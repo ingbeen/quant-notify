@@ -170,7 +170,11 @@ class TestUnitedStatesPricesNeedBothDays:
         """직전 거래일이 휴장을 건너뛴다. 09-08 의 짝은 09-07(노동절)이 아니라 09-04 다."""
         _install_closes(monkeypatch, {QQQ: _series([FRI, TUE], [718.96, 718.36])})
 
-        assert cli._united_states_prices(_at(WED, 7, 30)) == (718.96, 718.36)
+        inputs = cli._united_states_prices(_at(WED, 7, 30))
+
+        assert inputs is not None
+        assert (inputs.prev_close, inputs.current) == (718.96, 718.36)
+        assert inputs.last_confirmed == TUE
 
     def test_raises_when_the_target_close_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """당일 종가가 비면 멈춘다. 하루 전 종가로 판정하지 않는다."""
@@ -205,7 +209,11 @@ class TestKoreaPricesNeedThePreviousTradingDay:
         _install_closes(monkeypatch, {KODEX: _series([FRI, MON, TUE], [105720.0, 110820.0, 110335.0], tz=SEOUL)})
         monkeypatch.setattr(cli, "fetch_intraday_price", lambda ticker, today: 111000.0)
 
-        assert cli._korea_prices(_at(TUE, 14, 30)) == (110820.0, 111000.0)
+        inputs = cli._korea_prices(_at(TUE, 14, 30))
+
+        assert inputs is not None
+        assert (inputs.prev_close, inputs.current) == (110820.0, 111000.0)
+        assert inputs.last_confirmed == MON
 
     def test_raises_when_the_previous_trading_day_close_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """직전 한국 거래일 종가가 비면 멈춘다. 그 전날로 밀려 쓰지 않는다."""

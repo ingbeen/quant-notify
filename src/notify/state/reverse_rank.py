@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +16,7 @@ from notify.common_constants import MAX_DAILY_CHANGE_RATE
 
 # 종목마다 있어야 하는 항목
 _RATE_FIELDS = ("surge_1st", "surge_20th", "plunge_1st", "plunge_20th")
-_DATE_FIELDS = ("as_of", "data_from", "data_to")
+_DATE_FIELDS = ("data_from", "data_to")
 
 
 @dataclass(frozen=True)
@@ -35,10 +35,15 @@ class RankThresholds:
 
 @dataclass(frozen=True)
 class RankEntry:
-    """순위 등락률과 그 값이 무엇으로 언제 정해졌는지."""
+    """순위 등락률과 그 값이 어느 구간으로 매겨졌는지.
+
+    **`data_to` 가 기준일을 겸한다.** 판정이 묻는 것은 「이 날의 등락률이 줄 세우기에
+    들어갔나」이고, 그 답은 계산에 넣은 마지막 날 하나로 난다. 「값을 계산한 날」을
+    따로 두면 그것과 비교하게 되어, 계산일이 데이터 끝보다 늦을 때 그 사이의 도달일을
+    **이미 반영된 것으로 오판해 놓친다.**
+    """
 
     thresholds: RankThresholds
-    as_of: date
     data_from: date
     data_to: date
 
@@ -73,6 +78,10 @@ def _require_rate(raw: dict[str, Any], field: str, symbol: str) -> float:
 def _require_date(raw: dict[str, Any], field: str, symbol: str) -> date:
     """날짜 항목 하나를 꺼내 검증한다.
 
+    **날짜시각을 날짜로 받지 않는다.** TOML 은 `2026-08-26T00:00:00` 도 유효한 값으로
+    읽는데 `datetime` 은 `date` 의 하위형이라 형 검사를 그냥 통과한다. 그대로 넘기면
+    낡음 판정이 `date` 와 견주다 **필드 이름이 없는 TypeError** 로 멈춘다.
+
     Args:
         raw: 종목 하나의 원본 매핑.
         field: 항목 이름.
@@ -82,14 +91,14 @@ def _require_date(raw: dict[str, Any], field: str, symbol: str) -> date:
         날짜.
 
     Raises:
-        ValueError: 항목이 없거나 날짜가 아닐 때.
+        ValueError: 항목이 없거나, 날짜가 아니거나, 시각이 붙어 있을 때.
     """
     if field not in raw:
         raise ValueError(f"[{symbol}] '{field}' 항목이 없습니다. 순위 등락률 파일에 추가하세요.")
 
     value = raw[field]
-    if not isinstance(value, date):
-        raise ValueError(f"[{symbol}] '{field}' 는 날짜여야 합니다 (예: 2026-08-26). 지금 값: {value!r}")
+    if not isinstance(value, date) or isinstance(value, datetime):
+        raise ValueError(f"[{symbol}] '{field}' 는 날짜여야 합니다 (예: 2026-08-26). 시각은 붙이지 않습니다. 지금 값: {value!r}")
     return value
 
 

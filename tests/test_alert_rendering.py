@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 
 import pytest
@@ -19,7 +20,15 @@ from notify.alerts.buffer_zone import render as render_buffer_zone
 from notify.alerts.failure import render as render_failure
 from notify.alerts.formatting import RED_DOT
 from notify.alerts.health import HealthLine, expected_runs, previous_day_health, today_health, weekly_health
-from notify.alerts.reverse_rank import Market, judge, render, signal_prices
+from notify.alerts.reverse_rank import (
+    Direction,
+    Market,
+    UnreflectedDay,
+    judge,
+    render,
+    render_staleness,
+    signal_prices,
+)
 from notify.alerts.usdkrw import ReverseBlock, ReverseLine, WindowLine
 from notify.alerts.usdkrw import render as render_usdkrw
 from notify.common_constants import TZ_KST
@@ -31,6 +40,9 @@ KODEX = RankThresholds(surge_1st=0.2417, surge_20th=0.0610, plunge_1st=-0.1246, 
 # QQQ 순위 등락률
 QQQ = RankThresholds(surge_1st=0.1684, surge_20th=0.0742, plunge_1st=-0.1198, plunge_20th=-0.0687)
 
+# 순위 값이 매겨진 마지막 날. `state/reverse_rank.toml` 의 kodex200 실측값이다
+DATA_TO = date(2026, 8, 26)
+
 
 def _render(
     market: Market,
@@ -39,6 +51,8 @@ def _render(
     prev_close: float,
     current_price: float,
     sent_at: datetime,
+    data_to: date = DATA_TO,
+    unreflected: Sequence[UnreflectedDay] = (),
 ) -> str:
     """판정부터 문구까지 한 번에 만든다.
 
@@ -49,6 +63,8 @@ def _render(
         prev_close: 전일 종가.
         current_price: 판정 시점 가격.
         sent_at: 발송 시각.
+        data_to: 순위 값이 매겨진 마지막 날.
+        unreflected: 확정 종가로 잡힌 반영되지 않은 도달일.
 
     Returns:
         보낼 문구.
@@ -60,6 +76,8 @@ def _render(
         prices=signal_prices(prev_close, thresholds),
         thresholds=thresholds,
         sent_at=sent_at,
+        data_to=data_to,
+        unreflected=unreflected,
     )
 
 
@@ -146,6 +164,154 @@ class TestReverseRankUnitedStates:
         assert "도달" not in text
 
 
+class TestRankStalenessNotice:
+    """순위 갱신 필요 문구.
+
+    20위 안에 새로 드는 것이 곧 신호의 정의이므로(정본 1.5 절), 신호가 났으면 순위를
+    다시 매겨야 한다. 그 연결을 사용자가 기억하지 않게 알림이 직접 적는다.
+    """
+
+    def test_staleness_only_matches_the_documented_example(self) -> None:
+        """신호가 멀어도 순위가 낡았으면 그것만 알린다. 정본 예시와 글자 단위로 같다."""
+        text = render_staleness(
+            symbol="KODEX 200",
+            data_to=DATA_TO,
+            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.068)],
+            sent_at=datetime(2026, 9, 11, 12, 0, tzinfo=TZ_KST),
+        )
+
+        assert text == (
+            f"{RED_DOT} <b>역방향 · KODEX 200 · 순위 갱신 필요</b>\n"
+            "09-11 (금) 12:00\n"
+            "\n"
+            "순위값 08-26 (수) 기준\n"
+            "09-03 (목) 폭등 +6.80%"
+        )
+
+    def test_confirmed_signal_carries_the_block(self) -> None:
+        """미국은 종가가 확정돼 그날이 그대로 갱신 대상으로 적힌다."""
+        text = _render(
+            Market.US,
+            "QQQ",
+            QQQ,
+            prev_close=574.70,
+            current_price=619.50,
+            sent_at=datetime(2026, 9, 11, 7, 20, tzinfo=TZ_KST),
+            data_to=date(2026, 8, 25),
+            unreflected=[UnreflectedDay(on=date(2026, 9, 11), direction=Direction.SURGE, change_rate=0.0780)],
+        )
+
+        assert text == (
+            f"{RED_DOT} <b>역방향 · QQQ · 폭등 발생</b>\n"
+            "09-11 (금) 07:20\n"
+            "\n"
+            "종가 $619.50 +7.80%\n"
+            "신호 $617.34 +7.42%\n"
+            "\n"
+            "<b>순위 갱신 필요</b>\n"
+            "순위값 08-25 (화) 기준\n"
+            "09-11 (금) 폭등 +7.80%"
+        )
+
+    def test_intraday_hit_says_the_close_is_not_settled_yet(self) -> None:
+        """한국 장중 도달은 「오늘 종가 확정 시」로 적는다.
+
+        그날 종가가 아직 없어 순위에 들어갈지 단정할 수 없다. 확정된 날처럼 적으면
+        문구가 사실보다 앞서간다.
+        """
+        text = _render(
+            Market.KR,
+            "KODEX 200",
+            KODEX,
+            prev_close=112285.0,
+            current_price=120000.0,
+            sent_at=datetime(2026, 9, 11, 14, 30, tzinfo=TZ_KST),
+        )
+
+        assert text == (
+            f"{RED_DOT} <b>역방향 · KODEX 200 · 폭등 도달</b>\n"
+            "09-11 (금) 14:30\n"
+            "\n"
+            "현재 120,000원 +6.87%\n"
+            "신호 119,134원 +6.10%\n"
+            "\n"
+            "<b>순위 갱신 필요</b>\n"
+            "순위값 08-26 (수) 기준\n"
+            "09-11 (금) 폭등 +6.87% (미확정)"
+        )
+
+    def test_pending_today_is_shaped_like_the_confirmed_rows(self) -> None:
+        """오늘 줄이 확정된 날과 같은 모양으로 온다.
+
+        날짜 없이 조건만 적으면 바로 위 날짜를 꾸미는 말로 읽힌다. 여러 날이 나열될 때
+        어느 줄이 오늘인지 드러나야 한다.
+        """
+        text = _render(
+            Market.KR,
+            "KODEX 200",
+            KODEX,
+            prev_close=112285.0,
+            current_price=120000.0,
+            sent_at=datetime(2026, 9, 11, 14, 30, tzinfo=TZ_KST),
+            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.068)],
+        )
+
+        assert text.endswith("09-03 (목) 폭등 +6.80%\n" "09-11 (금) 폭등 +6.87% (미확정)")
+
+    def test_near_without_unreflected_days_carries_nothing(self) -> None:
+        """근접은 20위에 못 닿은 것이라 그날로는 순위가 바뀌지 않는다."""
+        text = _render(
+            Market.KR,
+            "KODEX 200",
+            KODEX,
+            prev_close=112285.0,
+            current_price=118100.0,
+            sent_at=datetime(2026, 9, 11, 12, 0, tzinfo=TZ_KST),
+        )
+
+        assert "순위 갱신 필요" not in text
+
+    def test_near_still_reports_an_earlier_unreflected_day(self) -> None:
+        """근접이어도 지난 도달일이 반영 안 됐으면 알린다.
+
+        **근접 여부와 순위 낡음은 다른 사실이다.** 블록을 도달에만 묶으면 종가 기준으로만
+        신호였던 날이 조용히 묻힌다 — 이 작업이 메우려던 구멍이다.
+        """
+        text = _render(
+            Market.KR,
+            "KODEX 200",
+            KODEX,
+            prev_close=112285.0,
+            current_price=118100.0,
+            sent_at=datetime(2026, 9, 11, 12, 0, tzinfo=TZ_KST),
+            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.068)],
+        )
+
+        assert "폭등 근접" in text
+        assert "순위 갱신 필요" in text
+        assert "09-03 (목) 폭등 +6.80%" in text
+        assert "미확정" not in text
+
+    def test_block_lists_every_unreflected_day(self) -> None:
+        """반영되지 않은 날이 여럿이면 모두 적는다. 하나만 적으면 나머지를 놓친다."""
+        text = _render(
+            Market.US,
+            "QQQ",
+            QQQ,
+            prev_close=574.70,
+            current_price=619.50,
+            sent_at=datetime(2026, 9, 11, 7, 20, tzinfo=TZ_KST),
+            data_to=date(2026, 8, 25),
+            unreflected=[
+                UnreflectedDay(on=date(2026, 9, 2), direction=Direction.PLUNGE, change_rate=-0.0712),
+                UnreflectedDay(on=date(2026, 9, 11), direction=Direction.SURGE, change_rate=0.0780),
+            ],
+        )
+
+        assert "09-02 (수) 폭락 -7.12%" in text
+        assert "09-11 (금) 폭등 +7.80%" in text
+
+
 class TestSilence:
     """침묵."""
 
@@ -161,6 +327,21 @@ class TestSilence:
                 prices=signal_prices(112285.0, KODEX),
                 thresholds=KODEX,
                 sent_at=datetime(2026, 9, 4, 12, 0, tzinfo=TZ_KST),
+                data_to=DATA_TO,
+            )
+
+    def test_rendering_staleness_without_any_day_raises(self) -> None:
+        """반영되지 않은 날이 없는데 갱신 문구를 만들려 하면 예외다.
+
+        알릴 것이 없으면 발송하지 않는다 — 빈 블록만 담긴 알림이 나가면 사용자가
+        무엇을 해야 하는지 알 수 없다.
+        """
+        with pytest.raises(RuntimeError, match="내부 불변조건 위반"):
+            render_staleness(
+                symbol="KODEX 200",
+                data_to=DATA_TO,
+                unreflected=(),
+                sent_at=datetime(2026, 9, 11, 12, 0, tzinfo=TZ_KST),
             )
 
 

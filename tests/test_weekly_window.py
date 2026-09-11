@@ -108,7 +108,7 @@ class TestWeeklyChangesUseAdjacentTradingDays:
         """거래일마다 그 직전 거래일과 견준다."""
         closes = _series(WEEK_DAYS, WEEK_CLOSES)
 
-        changes = cli._weekly_changes(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
+        changes = cli._change_rates(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
 
         assert _percent(changes) == {"08-31": 1.00, "09-01": -0.99, "09-02": 2.00, "09-03": 0.42, "09-04": 0.28}
 
@@ -116,7 +116,7 @@ class TestWeeklyChangesUseAdjacentTradingDays:
         """월요일 등락률은 창 밖인 전주 금요일 종가를 쓴다."""
         closes = _series(WEEK_DAYS, WEEK_CLOSES)
 
-        changes = cli._weekly_changes(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
+        changes = cli._change_rates(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
 
         assert round(float(changes[WEEK_START]) * 100, 2) == 1.00
 
@@ -128,7 +128,7 @@ class TestWeeklyChangesUseAdjacentTradingDays:
         closes = _series(WEEK_DAYS, WEEK_CLOSES).drop(pd.Timestamp(date(2026, 9, 1), tz="Asia/Seoul"))
 
         with pytest.raises(ValueError, match=r"069500\.KS"):
-            cli._weekly_changes(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
+            cli._change_rates(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
 
     def test_raises_when_the_day_before_the_window_is_missing(self) -> None:
         """창 «직전» 거래일이 비어도 멈춘다.
@@ -139,14 +139,14 @@ class TestWeeklyChangesUseAdjacentTradingDays:
         closes = _series(WEEK_DAYS, WEEK_CLOSES).drop(pd.Timestamp(PRIOR_FRIDAY, tz="Asia/Seoul"))
 
         with pytest.raises(ValueError, match=r"069500\.KS"):
-            cli._weekly_changes(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
+            cli._change_rates(closes, KODEX, KR_CALENDAR, WEEK_START, WEEK_END)
 
     def test_us_window_skips_the_holiday(self) -> None:
         """미국 달력에서는 휴장일을 아예 세지 않는다. 그 날 종가가 없어도 멈추지 않는다."""
         days = [date(2026, 9, 4), date(2026, 9, 8), date(2026, 9, 9), date(2026, 9, 10), date(2026, 9, 11)]
         closes = _series(days, [700.0, 707.0, 700.0, 714.0, 717.0], tz="America/New_York")
 
-        changes = cli._weekly_changes(closes, QQQ, US_CALENDAR, HOLIDAY_WEEK_START, HOLIDAY_WEEK_END)
+        changes = cli._change_rates(closes, QQQ, US_CALENDAR, HOLIDAY_WEEK_START, HOLIDAY_WEEK_END)
 
         assert list(_percent(changes)) == ["09-08", "09-09", "09-10", "09-11"]
         assert _percent(changes)["09-08"] == 1.00

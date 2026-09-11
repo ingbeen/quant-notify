@@ -17,7 +17,6 @@ from notify.state.reverse_rank import load_reverse_rank
 
 VALID_RANK = """
 [kodex200]
-as_of = 2026-08-26
 data_from = 2002-10-15
 data_to = 2026-08-26
 surge_1st = 0.2417
@@ -143,7 +142,7 @@ class TestReverseRankLoading:
 
     def test_missing_field_raises(self, tmp_path: Path) -> None:
         """필수 필드가 빠지면 예외다."""
-        body = "[kodex200]\nas_of = 2026-08-26\nsurge_20th = 0.0610\n"
+        body = "[kodex200]\ndata_to = 2026-08-26\nsurge_20th = 0.0610\n"
 
         with pytest.raises(ValueError):
             load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
@@ -180,8 +179,25 @@ class TestReverseRankLoading:
         with pytest.raises(ValueError):
             load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
 
-    def test_keeps_the_reference_date(self, tmp_path: Path) -> None:
-        """기준일을 함께 읽는다. 값이 언제 것인지 알아야 낡음을 판단할 수 있다."""
+    def test_date_with_a_time_raises(self, tmp_path: Path) -> None:
+        """날짜에 시각이 붙으면 예외다.
+
+        TOML 은 `2026-08-26T00:00:00` 도 유효한 값으로 읽고, `datetime` 은 `date` 의
+        하위형이라 형 검사를 그냥 통과한다. 넘어가면 낡음 판정이 `date` 와 견주다
+        **필드 이름이 없는 TypeError** 로 멈춘다 — 로딩 시점에 막아야 고칠 곳이 드러난다.
+        """
+        body = VALID_RANK.replace("data_to = 2026-08-26", "data_to = 2026-08-26T00:00:00")
+
+        with pytest.raises(ValueError, match="data_to"):
+            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
+
+    def test_keeps_the_ranking_period(self, tmp_path: Path) -> None:
+        """데이터 구간을 함께 읽는다.
+
+        `data_to` 가 기준일을 겸한다 — 알림이 「이 날 뒤에 20위에 든 날이 있는가」로
+        낡음을 판정하므로, 이 값이 없으면 판정 자체가 불가능하다.
+        """
         loaded = load_reverse_rank(_write(tmp_path, "reverse_rank.toml", VALID_RANK))
 
-        assert loaded["kodex200"].as_of.isoformat() == "2026-08-26"
+        assert loaded["kodex200"].data_from.isoformat() == "2002-10-15"
+        assert loaded["kodex200"].data_to.isoformat() == "2026-08-26"

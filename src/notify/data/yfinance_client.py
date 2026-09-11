@@ -176,6 +176,28 @@ def closes_through(closes: pd.Series, day: date, ticker: str) -> pd.Series:
     return through
 
 
+def first_change_day(closes: pd.Series, ticker: str) -> date:
+    """받은 종가로 등락률을 낼 수 있는 첫 날을 낸다.
+
+    **첫 종가에는 등락률이 없다** — 견줄 직전 종가가 창 밖이다. 그래서 두 번째 거래일이
+    계산 가능한 첫 날이고, 그보다 앞을 요구하면 종가를 날짜로 집는 자리에서 실패한다.
+
+    Args:
+        closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
+        ticker: 종목. 실패 문구에 쓴다.
+
+    Returns:
+        등락률을 낼 수 있는 첫 날.
+
+    Raises:
+        ValueError: 종가가 두 개보다 적을 때.
+    """
+    if len(closes) < 2:
+        raise ValueError(f"[{ticker}] 종가가 {len(closes)}개뿐이라 등락률을 낼 수 없습니다. 조회를 다시 실행하세요.")
+
+    return _index_date(closes.index[1])
+
+
 def close_on(closes: pd.Series, day: date, ticker: str) -> float:
     """그 날짜의 종가를 고른다.
 

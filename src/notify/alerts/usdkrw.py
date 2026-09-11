@@ -21,6 +21,7 @@ from notify.alerts.formatting import (
     format_rate,
 )
 from notify.alerts.health import HealthLine
+from notify.alerts.reverse_rank import reached_threshold
 
 
 @dataclass(frozen=True)
@@ -179,24 +180,6 @@ def _window_rows(windows: Sequence[WindowLine]) -> list[str]:
     return [
         f"{line.years}년 평균 {format_krw(line.mean_price)} 대비 {format_rate(line.deviation_rate, 1)}" for line in windows
     ]
-
-
-def reached_threshold(extreme_rate: float, rate_20th: float) -> bool:
-    """지난주 값이 순위 등락률에 닿았는지 본다.
-
-    폭등은 이상, 폭락은 이하다. **순위 등락률의 부호가 방향을 말한다** —
-    폭등 20위는 양수, 폭락 20위는 음수다.
-
-    Args:
-        extreme_rate: 지난주 값. 비율.
-        rate_20th: 20위 등락률. 비율.
-
-    Returns:
-        닿았으면 True.
-    """
-    if rate_20th >= 0:
-        return extreme_rate >= rate_20th
-    return extreme_rate <= rate_20th
 
 
 def _extreme_row(line: ReverseLine) -> str:
