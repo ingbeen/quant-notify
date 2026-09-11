@@ -32,8 +32,9 @@ from notify.alerts.health import (
     HealthLine,
     RunCounter,
     count_success_runs,
-    daily_health,
     measure_runs,
+    previous_day_health,
+    today_health,
     weekly_health,
 )
 from notify.alerts.reverse_rank import Market, judge, signal_prices
@@ -209,8 +210,17 @@ def run_buffer_zone(now: datetime) -> str | None:
         )
         holdings = [buffer_zone.HoldingLine(p.ticker, p.quantity, weights[p.ticker]) for p in positions]
 
+    # 최근 것이 위에 온다. 미국 역방향만 당일인 이유는 발화 시각에 있다 (health 모듈 문서).
+    #
+    # 전일 줄에 `target` 을 넘기지 않는다. 지금은 값이 같지만 `target` 은 **미국 종가를
+    # 고르는 날짜**라, 나중에 직전 미국 거래일 조회로 바뀌면 미국 휴장 다음날에 한국
+    # 역방향 실행이 통째로 빠진다 — 에러 없이
     counter = _health_counter()
-    health = [daily_health(target, counter), _weekly_slot(_last_monday(now.date()), counter)]
+    health = [
+        today_health(now.date(), counter),
+        previous_day_health(now.date() - timedelta(days=1), counter),
+        _weekly_slot(_last_monday(now.date()), counter),
+    ]
 
     return buffer_zone.render(sent_at=now, proximities=proximities, holdings=holdings, health=health)
 

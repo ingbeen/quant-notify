@@ -84,11 +84,15 @@ Timezone  Asia/Seoul
 
 | 잡 | 크론탭 | 시각 (KST) | 워크플로 파일 |
 | --- | --- | --- | --- |
+| 역방향 US | `20 7 * * 2-6` | 화~토 **07:20** | `reverse_rank_us.yml` |
 | 버퍼존 | `30 7 * * 2-6` | 화~토 07:30 | `buffer_zone.yml` |
-| 역방향 US | `30 7 * * 2-6` | 화~토 07:30 | `reverse_rank_us.yml` |
 | 역방향 KR | `0 12 * * 1-5` | 월~금 12:00 | `reverse_rank_kr.yml` |
 | 역방향 KR | `30 14 * * 1-5` | 월~금 14:30 | `reverse_rank_kr.yml` |
 | 주간 | `30 7 * * 1` | 월 07:30 | `usdkrw.yml` |
+
+> 🔴 **역방향 US 를 버퍼존보다 늦추지 마세요.** 버퍼존이 찍는 점검 줄이 **오늘 아침 US 가
+> 돌았는지**를 담습니다. 순서가 뒤집히면 매일 `🔴 역방향 US 0/1` 이 뜹니다.
+> 근거는 [DESIGN.md](DESIGN.md) 6.4 절에 있습니다.
 
 **API 버전은 `2026-03-10` 을 씁니다.** `2022-11-28` 은 2026-03-10 부로 deprecated 되었고
 2028-03-10 에 끊깁니다. 새 버전은 응답도 낫습니다 — `204 No Content` 대신 **`200 OK` 와 함께
@@ -152,9 +156,18 @@ gh workflow run usdkrw.yml
 `점검` 줄이 무엇을 보고 있는지 직접 확인할 때 씁니다.
 
 ```bash
-# 특정 날짜의 성공 실행 수
-gh run list --workflow=reverse_rank_kr.yml --status=success --created=2026-09-04
+# 특정 날짜(KST)의 성공 실행 수 — 점검 줄과 같은 구간으로 묻습니다
+gh api -X GET repos/ingbeen/quant-notify/actions/workflows/reverse_rank_us.yml/runs \
+  -f created="2026-09-09T15:00:00Z..2026-09-10T14:59:59Z" -f status=success \
+  --jq '{total_count, runs: [.workflow_runs[] | .created_at]}'
 
 # 최근 실패만
 gh run list --status=failure --limit=10
 ```
+
+> 🔴 **`--created=2026-09-04` 같은 날짜 하나로 묻지 마세요. 그 필터는 UTC 기준입니다.**
+> 아침 알림(역방향 US 07:20 · 버퍼존 07:30 · 주간 월 07:30)은 UTC 로 **전날 22:20~22:30**
+> 이라 하루 어긋난 결과가 나오고, **에러는 나지 않습니다.** 한국 역방향(12:00·14:30)만
+> UTC 로도 날짜가 같아 우연히 맞습니다. 위 예시의 `전날 15:00:00Z..당일 14:59:59Z` 가
+> KST 하루입니다. 근거는 [DESIGN.md](DESIGN.md) 7.3 절과
+> `research/데이터소스_실측.md` §7 에 있습니다.

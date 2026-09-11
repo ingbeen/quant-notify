@@ -18,7 +18,7 @@ from notify.alerts.buffer_zone import HoldingLine, ProximityLine
 from notify.alerts.buffer_zone import render as render_buffer_zone
 from notify.alerts.failure import render as render_failure
 from notify.alerts.formatting import RED_DOT
-from notify.alerts.health import HealthLine, daily_health, expected_runs, weekly_health
+from notify.alerts.health import HealthLine, expected_runs, previous_day_health, today_health, weekly_health
 from notify.alerts.reverse_rank import Market, judge, render, signal_prices
 from notify.alerts.usdkrw import ReverseBlock, ReverseLine, WindowLine
 from notify.alerts.usdkrw import render as render_usdkrw
@@ -187,7 +187,8 @@ class TestBufferZone:
             ],
             holdings=holdings,
             health=[
-                HealthLine("전일", "09-03 (목)", "역방향 KR 2/2 · US 1/1"),
+                HealthLine("오늘", "09-04 (금)", "역방향 US 1/1"),
+                HealthLine("전일", "09-03 (목)", "역방향 KR 2/2"),
                 HealthLine("최근 주간", "08-31 (월)", "1/1"),
             ],
         )
@@ -210,7 +211,8 @@ class TestBufferZone:
             "GLD 10주 · 12.7%\n"
             "\n"
             "<b>점검</b>\n"
-            "전일 09-03 (목) · 역방향 KR 2/2 · US 1/1\n"
+            "오늘 09-04 (금) · 역방향 US 1/1\n"
+            "전일 09-03 (목) · 역방향 KR 2/2\n"
             "최근 주간 08-31 (월) · 1/1"
         )
 
@@ -396,18 +398,22 @@ class TestHealthLineFlowsIntoAlerts:
         """
         return expected_runs(workflow, day)
 
-    def test_daily_line_matches_the_documented_row(self) -> None:
-        """전일 점검 줄이 정본의 그 줄로 이어진다."""
-        line = daily_health(date(2026, 9, 3), self._as_expected)
+    def test_today_and_previous_day_lines_match_the_documented_rows(self) -> None:
+        """오늘·전일 점검 줄이 정본의 그 두 줄로 이어진다.
+
+        미국 역방향만 당일이고 한국 역방향은 전일이다. 발화 시각이 그렇게 정한다.
+        """
+        today = today_health(date(2026, 9, 4), self._as_expected)
+        previous = previous_day_health(date(2026, 9, 3), self._as_expected)
 
         text = render_buffer_zone(
             sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
             proximities=[ProximityLine("SPY", 0.1156), ProximityLine("QQQ", 0.1938)],
             holdings=[],
-            health=[line, HealthLine("최근 주간", "08-31 (월)", "1/1")],
+            health=[today, previous, HealthLine("최근 주간", "08-31 (월)", "1/1")],
         )
 
-        assert "전일 09-03 (목) · 역방향 KR 2/2 · US 1/1" in text
+        assert "오늘 09-04 (금) · 역방향 US 1/1\n전일 09-03 (목) · 역방향 KR 2/2" in text
 
     def test_weekly_line_matches_the_documented_row(self) -> None:
         """지난주 점검 줄이 정본의 그 두 줄로 이어진다."""
