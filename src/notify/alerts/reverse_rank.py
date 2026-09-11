@@ -168,6 +168,13 @@ def unreflected_window(data_to: date, last_confirmed: date, first_computable: da
     몇 년에 한 번 바뀌므로(정본 1.5 절: 최근 5년간 2회) 1년 넘은 `data_to` 가 정상이고,
     매일 도는 판정이 그 사이를 이미 덮었다.
 
+    **`data_to` 가 마지막 확정 종가일에 닿아 있거나 그 뒤면 검사할 날이 없다.** 장중 판정은
+    마지막 확정 종가일이 **전일**이라, 사용자가 마감 뒤 재계산해 오늘 날짜로 올린 직후가
+    정확히 그 모양이다 — **정상이므로 조용히 비운다.**
+
+    **말이 안 되는 미래 날짜는 여기 오기 전에 막힌다** (`state/reverse_rank.py` 의 로딩 시점
+    검증). 그래서 이 함수는 「검사할 날이 있나」만 본다.
+
     Args:
         data_to: 순위 값이 매겨진 마지막 날.
         last_confirmed: 마지막 확정 종가일.
@@ -175,13 +182,7 @@ def unreflected_window(data_to: date, last_confirmed: date, first_computable: da
 
     Returns:
         창의 (시작, 끝). 검사할 날이 없으면 None.
-
-    Raises:
-        ValueError: `data_to` 가 마지막 확정 종가일보다 뒤일 때.
     """
-    if data_to > last_confirmed:
-        raise ValueError(f"순위 등락률의 data_to ({data_to}) 가 마지막 확정 종가일 ({last_confirmed}) 보다 뒤입니다. " f"날짜를 잘못 적었는지 확인하세요.")
-
     start = max(data_to + timedelta(days=1), first_computable)
     if start > last_confirmed:
         return None

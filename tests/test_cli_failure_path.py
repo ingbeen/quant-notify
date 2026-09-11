@@ -39,7 +39,7 @@ class TestFailureIsAnnounced:
         sent: list[str] = []
 
         monkeypatch.setattr(cli, "build_message", _fail)
-        monkeypatch.setattr(cli, "_config", lambda name, required=True: "dummy")
+        monkeypatch.setattr(cli, "read_config", lambda name, required=True: "dummy")
         monkeypatch.setattr(
             cli.telegram,
             "send_without_raising",
@@ -57,7 +57,7 @@ class TestFailureIsAnnounced:
         여기서 예외가 올라가면 실패를 알리다 다시 실패하고, 그 실패를 또 알리려 든다.
         """
         monkeypatch.setattr(cli, "build_message", _fail)
-        monkeypatch.setattr(cli, "_config", lambda name, required=True: "dummy")
+        monkeypatch.setattr(cli, "read_config", lambda name, required=True: "dummy")
 
         def _boom(token: str, chat_id: str, text: str) -> None:
             del token, chat_id, text
@@ -86,7 +86,7 @@ class TestFailureIsAnnounced:
     def test_missing_secrets_do_not_crash(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """시크릿이 없으면 보내지 못하고 끝난다. 그 자리에서 다시 죽지 않는다."""
         monkeypatch.setattr(cli, "build_message", _fail)
-        monkeypatch.setattr(cli, "_config", lambda name, required=True: "")
+        monkeypatch.setattr(cli, "read_config", lambda name, required=True: "")
 
         def _never(token: str, chat_id: str, text: str) -> bool:
             del token, chat_id, text
@@ -122,7 +122,7 @@ class TestSendFailureIsNotRetried:
         텔레그램이 죽었으면 텔레그램으로 알릴 수 없다. GitHub Actions 실패 메일이 맡는다.
         """
         monkeypatch.setattr(cli, "build_message", lambda alert, now: "본문")
-        monkeypatch.setattr(cli, "_config", lambda name, required=True: "dummy")
+        monkeypatch.setattr(cli, "read_config", lambda name, required=True: "dummy")
 
         def _fail_send(token: str, chat_id: str, text: str) -> None:
             del token, chat_id, text

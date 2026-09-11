@@ -8,10 +8,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from notify.common_constants import TZ_KST
 from notify.state.positions import load_positions
 from notify.state.reverse_rank import load_reverse_rank
 
@@ -201,3 +203,36 @@ class TestReverseRankLoading:
 
         assert loaded["kodex200"].data_from.isoformat() == "2002-10-15"
         assert loaded["kodex200"].data_to.isoformat() == "2026-08-26"
+
+    def test_future_data_to_raises(self, tmp_path: Path) -> None:
+        """`data_to` 가 미래면 예외다.
+
+        **여기서 막지 않으면 낡음 검사가 통째로 꺼진다.** 검사할 날이 하나도 남지
+        않는데 알림은 정상으로 보인다.
+
+        **알림마다 따로 재지 않고 파일을 읽는 자리에서 한 번 잰다** — 주간 알림은
+        이 파일을 읽지만 낡음 판정을 하지 않아, 판정 쪽에만 두면 그 경로가 빠진다.
+        """
+        future = (datetime.now(TZ_KST).date() + timedelta(days=1)).isoformat()
+        body = VALID_RANK.replace("data_to = 2026-08-26", f"data_to = {future}")
+
+        with pytest.raises(ValueError, match="data_to"):
+            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
+
+    def test_today_data_to_is_accepted(self, tmp_path: Path) -> None:
+        """오늘 날짜는 정상이다.
+
+        마감 뒤 재계산해 그날로 올리는 것이 규칙이 말하는 갱신 방식이다
+        (`reference/역방향_매매_규칙.md` 1.5 절 — 신호가 나면 그날 재계산).
+        """
+        today = datetime.now(TZ_KST).date().isoformat()
+        body = VALID_RANK.replace("data_to = 2026-08-26", f"data_to = {today}")
+
+        assert load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))["kodex200"].data_to.isoformat() == today
+
+    def test_reversed_period_raises(self, tmp_path: Path) -> None:
+        """시작이 끝보다 뒤면 예외다. 두 날짜의 순서는 아무 데서도 검사되지 않았다."""
+        body = VALID_RANK.replace("data_from = 2002-10-15", "data_from = 2026-08-27")
+
+        with pytest.raises(ValueError, match="data_from"):
+            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))

@@ -6,8 +6,9 @@
 - **거래소 달력을 바꿔 끼우면** 한국 휴장이 미국 휴장으로 판정돼 검사 구간이 달라진다
 - **마지막 확정 종가일을 오늘로 주면** 아직 종가가 없는 날이 검사에 들어온다
 - **검사가 실패하면 신호 알림까지 삼킨다** — 연 5~8회뿐인 사건을 잃는다
+- **「검사할 날이 없다」를 오류로 읽으면** 마감 뒤 갱신한 정상 파일이 실패 알림을 낸다
 
-세 경우 모두 판정 함수만 보는 테스트로는 전부 통과한다.
+네 경우 모두 판정 함수만 보는 테스트로는 전부 통과한다.
 """
 
 from __future__ import annotations
@@ -239,3 +240,51 @@ class TestScanFailureNeverSwallowsTheSignal:
 
         with pytest.raises(ValueError):
             cli._run_reverse(Market.US, _at(WED, 7, 20))
+
+
+class TestFreshRankDateIsNotAnError:
+    """마감 뒤 «오늘» 날짜로 갱신한 파일은 정상이다.
+
+    장중 판정은 마지막 확정 종가일이 **전일**이다. 그래서 「`data_to` 가 마지막 확정
+    종가일보다 뒤인가」로 재면, 사용자가 마감 뒤 재계산해 오늘 날짜로 올린 **정상 파일**이
+    걸린다 — 연 5~8회뿐인 신호 대신 실패 알림이 간다.
+
+    **검사할 날이 없는 것과 값이 틀린 것은 다르다.** 말이 안 되는 미래 날짜는 파일을
+    읽는 자리가 막고(`tests/test_state_loading.py`), 여기서는 조용히 비운다.
+    """
+
+    def test_data_to_on_today_stays_silent(
+        self, monkeypatch: pytest.MonkeyPatch, kodex_thresholds: dict[str, float]
+    ) -> None:
+        """오늘로 갱신한 직후 장중 재실행은 그냥 조용하다."""
+        _install(
+            monkeypatch,
+            KODEX,
+            _series([FRI, MON, TUE], [100000.0, 107000.0, 114500.0], tz=SEOUL),
+            kodex_thresholds,
+            data_to=TUE,
+            intraday=107000.0,
+        )
+
+        assert cli._run_reverse(Market.KR, _at(TUE, 14, 30)) is None
+
+    def test_data_to_on_today_does_not_swallow_a_signal(
+        self, monkeypatch: pytest.MonkeyPatch, kodex_thresholds: dict[str, float]
+    ) -> None:
+        """신호가 난 날이면 그 신호는 그대로 나간다. 갱신 블록만 없다."""
+        _install(
+            monkeypatch,
+            KODEX,
+            _series([FRI, MON, TUE], [100000.0, 107000.0, 114500.0], tz=SEOUL),
+            kodex_thresholds,
+            data_to=TUE,
+            intraday=115000.0,
+        )
+
+        text = cli._run_reverse(Market.KR, _at(TUE, 14, 30))
+
+        assert text is not None
+        assert "폭등 도달" in text
+        assert "순위 갱신 필요" in text
+        # 확정 종가로 잡힌 날은 없고, 오늘 장중 줄만 붙는다
+        assert "09-07 (월)" not in text

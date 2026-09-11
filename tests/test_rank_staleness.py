@@ -68,14 +68,18 @@ class TestUnreflectedWindow:
         """
         assert unreflected_window(LAST_CONFIRMED, LAST_CONFIRMED, FIRST_COMPUTABLE) is None
 
-    def test_raises_when_data_to_is_ahead_of_the_last_confirmed_day(self) -> None:
-        """`data_to` 가 마지막 확정 종가일보다 뒤면 예외다.
+    def test_no_window_when_data_to_is_ahead_of_the_last_confirmed_day(self) -> None:
+        """`data_to` 가 마지막 확정 종가일보다 뒤여도 여기서는 조용히 비운다.
 
-        사람이 손으로 적는 값이라 미래 날짜가 들어올 수 있다. 이것을 창이 빈 것으로
-        처리하면 **검사가 통째로 꺼진 채 알림은 정상으로 보인다.**
+        **장중 판정은 마지막 확정 종가일이 「전일」이다.** 사용자가 마감 뒤 재계산해
+        오늘 날짜로 올린 정상 파일이 정확히 이 모양이라, 예외를 내면 그날의 신호 대신
+        실패 알림이 간다.
+
+        **말이 안 되는 미래 날짜는 파일을 읽는 자리가 막는다** —
+        `tests/test_state_loading.py` 가 그쪽을 묶는다. 검사가 조용히 꺼지는 구멍은
+        거기서 닫힌다.
         """
-        with pytest.raises(ValueError, match="data_to"):
-            unreflected_window(date(2026, 9, 11), LAST_CONFIRMED, FIRST_COMPUTABLE)
+        assert unreflected_window(date(2026, 9, 11), LAST_CONFIRMED, FIRST_COMPUTABLE) is None
 
     def test_window_starts_at_the_first_computable_day_when_data_to_is_older(self) -> None:
         """`data_to` 가 받은 시세보다 오래되면 시작이 첫 계산가능일로 당겨진다.

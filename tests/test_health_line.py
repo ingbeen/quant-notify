@@ -287,9 +287,15 @@ class TestExpectedRuns:
         assert expected_runs(WORKFLOW_USDKRW, MONDAY) == 1
         assert expected_runs(WORKFLOW_USDKRW, FRIDAY) == 0
 
-    def test_unknown_workflow_expects_nothing(self) -> None:
-        """모르는 워크플로는 0 이다."""
-        assert expected_runs("nope.yml", FRIDAY) == 0
+    def test_unknown_workflow_stops(self) -> None:
+        """모르는 워크플로는 멈춘다. 조용히 0 을 돌려주지 않는다.
+
+        분모가 0 이면 `actual < expected` 가 영원히 거짓이 되어 **덜 돌았을 때의 강조가
+        통째로 꺼진다** — 점검 줄이 존재하는 이유가 사라지는데 화면은 정상으로 보인다.
+        워크플로 이름은 모듈 상수로만 들어오므로 모르는 이름은 **코드 버그**다.
+        """
+        with pytest.raises(RuntimeError, match="nope.yml"):
+            expected_runs("nope.yml", FRIDAY)
 
 
 class TestTodayHealth:

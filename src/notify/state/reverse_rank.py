@@ -12,7 +12,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
-from notify.common_constants import MAX_DAILY_CHANGE_RATE
+from notify.common_constants import MAX_DAILY_CHANGE_RATE, TZ_KST
 
 # 종목마다 있어야 하는 항목
 _RATE_FIELDS = ("surge_1st", "surge_20th", "plunge_1st", "plunge_20th")
@@ -102,6 +102,37 @@ def _require_date(raw: dict[str, Any], field: str, symbol: str) -> date:
     return value
 
 
+def _check_period(data_from: date, data_to: date, symbol: str) -> None:
+    """데이터 구간이 말이 되는지 본다.
+
+    **`data_to` 가 미래면 낡음 검사가 통째로 꺼진다.** 검사할 날이 하나도 남지 않는데
+    알림은 정상으로 보이므로, 값이 들어오는 자리에서 막는다 (docs/DESIGN.md 5.2 절).
+    **여기서 막으면 알림 넷 전부가 덮인다** — 주간 알림도 이 파일을 읽는다.
+
+    **오늘은 KST 로 센다.** 워크플로는 UTC 로 도는데 아침 알림은 UTC 로 전날이라,
+    현지 날짜로 재면 정상인 `data_to` 가 미래로 읽힌다 (docs/DESIGN.md 7.3 절).
+
+    **「마지막 확정 종가일보다 뒤인가」로 재지 않는다.** 장중 판정에서 그 값은 전일이라,
+    사용자가 마감 뒤 재계산해 오늘 날짜로 올린 **정상 파일**이 걸린다.
+
+    Args:
+        data_from: 데이터 구간의 시작.
+        data_to: 줄 세우기에 넣은 마지막 날.
+        symbol: 종목 식별자. 오류 메시지에 쓴다.
+
+    Raises:
+        ValueError: 시작이 끝보다 뒤이거나, 끝이 미래일 때.
+    """
+    if data_from > data_to:
+        raise ValueError(f"[{symbol}] 'data_from' ({data_from}) 이 'data_to' ({data_to}) 보다 뒤입니다.")
+
+    today = datetime.now(TZ_KST).date()
+    if data_to > today:
+        raise ValueError(
+            f"[{symbol}] 'data_to' ({data_to}) 가 미래입니다 (오늘 {today}). " f"그대로 두면 순위 낡음 검사가 꺼진 채 알림만 정상으로 보입니다."
+        )
+
+
 def _build_thresholds(raw: dict[str, Any], symbol: str) -> RankThresholds:
     """종목 하나의 순위 등락률을 만든다.
 
@@ -150,6 +181,7 @@ def load_reverse_rank(path: Path) -> dict[str, RankEntry]:
 
     Raises:
         ValueError: 파일이 없거나, 형식이 깨졌거나, 종목이 하나도 없거나, 값이 규격을 벗어날 때.
+            **데이터 구간 검증도 여기서 한다** — 알림마다 따로 재면 어느 알림은 빠진다.
     """
     if not path.is_file():
         raise ValueError(f"순위 등락률 파일이 없습니다: {path}. 파일을 만들고 종목별 순위 값을 적으세요.")
@@ -167,6 +199,7 @@ def load_reverse_rank(path: Path) -> dict[str, RankEntry]:
         if not isinstance(raw, dict):
             raise ValueError(f"[{symbol}] 은 종목 블록이어야 합니다 (예: [kodex200]).")
         dates = {field: _require_date(raw, field, symbol) for field in _DATE_FIELDS}
+        _check_period(dates["data_from"], dates["data_to"], symbol)
         entries[symbol] = RankEntry(thresholds=_build_thresholds(raw, symbol), **dates)
 
     return entries

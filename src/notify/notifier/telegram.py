@@ -7,13 +7,17 @@
 **알림 채널 자체의 실패는 다시 알리지 않는다.** 실패 알림을 보내다 실패했다고 또 알림을
 보내면 같은 자리에서 돌기만 한다. 그 경우는 로그로만 남기고, GitHub Actions 실패 메일이
 마지막 보루가 된다.
+
+**봇 토큰이 요청 주소에 들어간다.** `requests` 예외 문자열은 주소를 담으므로 그대로 올리면
+토큰이 밖으로 나간다 — 이 예외는 잡히지 않고 트레이스백으로 끝나므로 로거 마스킹이 닿지
+않는다. 그래서 **여기서 가려서** 다시 낸다. `data/ecos_client.py` 와 같은 방식이다.
 """
 
 from __future__ import annotations
 
 import requests
 
-from notify.utils.logger import get_logger
+from notify.utils.logger import get_logger, mask_credentials
 
 logger = get_logger(__name__)
 
@@ -58,7 +62,7 @@ def send(token: str, chat_id: str, text: str) -> None:
         response = requests.post(url, json=build_payload(chat_id, text), timeout=TIMEOUT_SECONDS)
         response.raise_for_status()
     except requests.RequestException as exc:
-        raise ValueError(f"텔레그램 발송에 실패했습니다: {exc}") from None
+        raise ValueError(f"텔레그램 발송에 실패했습니다: {mask_credentials(str(exc))}") from None
 
     logger.debug(f"알림을 보냈습니다 ({len(text)}자)")
 

@@ -17,6 +17,9 @@ STATE_DIR = PROJECT_ROOT / "state"
 POSITIONS_PATH = STATE_DIR / "positions.toml"
 REVERSE_RANK_PATH = STATE_DIR / "reverse_rank.toml"
 
+# 로컬 자격증명. git 에서 제외돼 있고 워크플로에는 존재하지 않는다 (utils/config.py)
+ENV_FILE_PATH = PROJECT_ROOT / ".env"
+
 # 이동평균 근접도를 보는 티커
 TICKER_SPY = "SPY"
 TICKER_QQQ = "QQQ"

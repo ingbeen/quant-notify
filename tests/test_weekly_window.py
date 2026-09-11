@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import cast
 
 import pandas as pd
@@ -41,6 +41,9 @@ WEEK_CLOSES = [700.0, 707.0, 700.0, 714.0, 717.0, 719.0]
 # 2026-09-07(월)은 미국 노동절 휴장이고 한국은 거래일이다
 HOLIDAY_WEEK_START = date(2026, 9, 7)
 HOLIDAY_WEEK_END = date(2026, 9, 11)
+
+# 08-31 주의 «다음» 월요일. 이 주 아무 날에 돌려도 지난주는 08-31 주여야 한다
+WEEK_AFTER = date(2026, 9, 7)
 
 
 def _series(days: list[date], values: list[float], tz: str = "Asia/Seoul") -> pd.Series:
@@ -150,6 +153,46 @@ class TestWeeklyChangesUseAdjacentTradingDays:
 
         assert list(_percent(changes)) == ["09-08", "09-09", "09-10", "09-11"]
         assert _percent(changes)["09-08"] == 1.00
+
+
+class TestLastWeekIsIndependentOfTheRunDay:
+    """「지난주」가 실행 요일에 흔들리지 않는지.
+
+    주간 알림은 월요일 아침에 돌지만 **수동 실행은 그 뒤 아무 날에나** 일어난다
+    (`docs/DESIGN.md` §7.2 — 트리거가 실패하면 사람이 다시 돌린다). 실행 요일이
+    구간을 밀면 창이 **미래로 넘어가** 아직 없는 종가를 요구하고, 복구 경로가 막힌다.
+    """
+
+    def test_every_run_day_in_the_week_gives_the_same_window(self) -> None:
+        """같은 주 안에서는 어느 날에 돌려도 같은 지난주를 가리킨다.
+
+        **일요일까지 센다.** 거기서 `weekday()` 가 6 이라 13일을 되짚는데, 한국에서는
+        일요일을 주의 «시작» 으로 보는 관습이 있어 답이 한 주 어긋나 보이기 쉽다.
+        이 함수는 `weekday()` 가 정하는 월요일 시작 주를 따른다.
+        """
+        windows = {cli._last_week_monday(WEEK_AFTER + timedelta(days=offset)) for offset in range(7)}
+
+        assert windows == {WEEK_START}
+
+    def test_monday_keeps_the_current_behaviour(self) -> None:
+        """월요일 결과가 바뀌지 않는다. 정시 실행이 유일하게 돌던 경로다."""
+        assert cli._last_week_monday(WEEK_AFTER) == WEEK_START
+
+    def test_the_window_never_reaches_into_the_future(self) -> None:
+        """구간의 끝이 실행일보다 앞이다. 미래 거래일의 종가를 요구하지 않는다."""
+        for offset in range(7):
+            today = WEEK_AFTER + timedelta(days=offset)
+            week_end = cli._last_week_monday(today) + timedelta(days=cli.TRADING_WEEK_OFFSET)
+
+            assert week_end < today
+
+    def test_previous_monday_still_means_the_nearest_one(self) -> None:
+        """버퍼존 점검이 쓰는 쪽은 «가장 최근에 지나간» 월요일 그대로다.
+
+        두 뜻이 한 함수에 묶여 있었고 **월요일에만 겹쳐서** 어긋남이 드러나지 않았다.
+        """
+        assert cli._previous_monday(WEEK_AFTER + timedelta(days=1)) == WEEK_AFTER
+        assert cli._previous_monday(WEEK_AFTER) == WEEK_START
 
 
 class TestClosesThrough:

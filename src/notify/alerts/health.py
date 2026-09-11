@@ -20,6 +20,8 @@ GitHub Actions 실행 이력을 읽을 뿐 아무것도 저장하지 않는다. 
 아침 알림은 전날로 밀린다 — `kst_day_window` 를 본다.
 
 **조회가 실패해도 본 알림은 정상 발송한다.** 점검 때문에 알림이 막히면 안 된다.
+**단 「모르는 워크플로 이름」은 예외다** — 그것은 조회 실패가 아니라 코드 버그이고,
+삼키면 분모가 0 이 되어 강조가 통째로 꺼진다 (`expected_runs`).
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ import requests
 
 from notify.alerts.formatting import alert, format_day
 from notify.common_constants import TZ_KST
-from notify.utils.logger import get_logger
+from notify.utils.logger import get_logger, mask_credentials
 
 logger = get_logger(__name__)
 
@@ -144,7 +146,9 @@ def count_success_runs(repository: str, token: str, workflow: str, day: date) ->
         response.raise_for_status()
         payload = response.json()
     except requests.RequestException as exc:
-        raise ValueError(f"실행 이력 조회에 실패했습니다: {exc}") from None
+        # 지금 이 주소에는 자격증명이 없지만, 자격증명을 담게 되는 날 조용히 새지 않도록
+        # **예외를 만드는 자리에서 가리는** 저장소 관용을 따른다 (data/ecos_client.py)
+        raise ValueError(f"실행 이력 조회에 실패했습니다: {mask_credentials(str(exc))}") from None
 
     total = payload.get("total_count") if isinstance(payload, dict) else None
     if not isinstance(total, int):
@@ -166,7 +170,10 @@ def expected_runs(workflow: str, day: date) -> int:
         day: 판정할 날짜.
 
     Returns:
-        예정된 실행 수. 모르는 워크플로면 0.
+        예정된 실행 수.
+
+    Raises:
+        RuntimeError: 모르는 워크플로일 때.
     """
     weekday = day.weekday()
 
@@ -176,7 +183,11 @@ def expected_runs(workflow: str, day: date) -> int:
         return _KR_RUNS_PER_DAY if weekday in _KR_ALERT_WEEKDAYS else 0
     if workflow in (WORKFLOW_BUFFER_ZONE, WORKFLOW_REVERSE_US):
         return 1 if weekday in _US_ALERT_WEEKDAYS else 0
-    return 0
+
+    # 0 을 돌려주면 `actual < expected` 가 영원히 거짓이 되어 **덜 돌았을 때의 강조가
+    # 통째로 꺼진다.** 점검 줄이 존재하는 이유가 사라지는데 화면은 정상으로 보인다.
+    # 이름은 위 상수로만 들어오므로 여기 닿았다면 코드가 틀린 것이다
+    raise RuntimeError(f"내부 불변조건 위반: 모르는 워크플로입니다: {workflow!r}")
 
 
 @dataclass(frozen=True)
@@ -200,6 +211,9 @@ def measure_runs(label: str, workflow: str, days: Sequence[date], count_runs: Ru
     조회가 실패해도 예외를 올리지 않는다. 그 워크플로만 실패로 적고 나머지 숫자는 살린다 —
     한 덩어리로 뭉개면 무엇이 실패했는지 알 수 없다.
 
+    **예정 수 계산은 `try` 밖에 둔다.** 그것이 실패하는 경우는 모르는 워크플로 이름뿐이고,
+    그건 조회 실패가 아니라 코드 버그다. 같이 삼키면 분모 0 이 강조를 꺼 버린다.
+
     Args:
         label: 화면에 쓸 이름. 비우면 숫자만 적는다.
         workflow: 워크플로 파일 이름.
@@ -208,6 +222,9 @@ def measure_runs(label: str, workflow: str, days: Sequence[date], count_runs: Ru
 
     Returns:
         잰 결과.
+
+    Raises:
+        RuntimeError: 모르는 워크플로 이름일 때.
     """
     expected = sum(expected_runs(workflow, day) for day in days)
 
@@ -224,7 +241,7 @@ def measure_runs(label: str, workflow: str, days: Sequence[date], count_runs: Ru
 def _detail(entries: Sequence[tuple[str, str]], days: Sequence[date], count_runs: RunCounter) -> str:
     """점검 상세를 만든다.
 
-    조회가 실패해도 예외를 밖으로 내보내지 않는다. 점검 때문에 본 알림이 막히면 안 된다.
+    **조회**가 실패해도 예외를 밖으로 내보내지 않는다. 점검 때문에 본 알림이 막히면 안 된다.
     **전부 실패했으면 워크플로마다 같은 말을 되풀이하지 않고 한 번만 적는다.**
 
     Args:
@@ -234,6 +251,10 @@ def _detail(entries: Sequence[tuple[str, str]], days: Sequence[date], count_runs
 
     Returns:
         상세 문자열.
+
+    Raises:
+        RuntimeError: 모르는 워크플로 이름일 때. 조회 실패와 달리 **삼키지 않는다** —
+            분모가 0 이 되면 강조가 꺼져 점검 줄이 뜻을 잃는다 (`expected_runs`).
     """
     reports = [measure_runs(label, workflow, days, count_runs) for label, workflow in entries]
     if reports and all(report.lookup_failed for report in reports):

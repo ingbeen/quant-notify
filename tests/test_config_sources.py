@@ -12,22 +12,24 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from notify import cli
 from notify.common_constants import TZ_KST
+from notify.utils import config
 
 
 @pytest.fixture
-def without_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+def without_env_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`.env` 가 없는 상황을 만든다. 워크플로가 그 상태다.
 
     Args:
         monkeypatch: 패치 도구.
         tmp_path: 임시 디렉터리.
     """
-    monkeypatch.setattr(cli, "ENV_FILE_PATH", tmp_path / "not-there.env")
+    monkeypatch.setattr(config, "ENV_FILE_PATH", tmp_path / "not-there.env")
 
 
 class TestConfig:
@@ -39,20 +41,20 @@ class TestConfig:
         """`.env` 가 없어도 환경 변수로 읽는다."""
         monkeypatch.setenv("ECOS_API_KEY", "KEY-FROM-ENVIRONMENT")
 
-        assert cli._config("ECOS_API_KEY") == "KEY-FROM-ENVIRONMENT"
+        assert config.read_config("ECOS_API_KEY") == "KEY-FROM-ENVIRONMENT"
 
     def test_missing_required_value_raises(self, monkeypatch: pytest.MonkeyPatch, without_env_file: None) -> None:
         """필수인데 어디에도 없으면 예외다. 빈 값으로 조회에 들어가지 않는다."""
         monkeypatch.delenv("ECOS_API_KEY", raising=False)
 
         with pytest.raises(ValueError, match="ECOS_API_KEY"):
-            cli._config("ECOS_API_KEY")
+            config.read_config("ECOS_API_KEY")
 
     def test_optional_value_returns_empty(self, monkeypatch: pytest.MonkeyPatch, without_env_file: None) -> None:
         """필수가 아니면 빈 문자열을 돌려준다. 점검 줄이 이 경로를 쓴다."""
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
 
-        assert cli._config("GITHUB_TOKEN", required=False) == ""
+        assert config.read_config("GITHUB_TOKEN", required=False) == ""
 
 
 class TestUsdKrwReadsTheKeyLikeEverythingElse:

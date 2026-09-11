@@ -2,8 +2,8 @@
 
 ECOS 는 **인증키를 요청 URL 경로에 넣는다.** 그래서 두 가지를 지킨다.
 
-1. 인증키를 `os.environ` 에 올리지 않고 값으로만 다룬다. 환경 변수로 올리면
-   이후 실행되는 모든 하위 프로세스가 키를 상속받는다.
+1. 인증키를 **인자로 받기만 한다.** 이 모듈은 자격증명을 찾아 읽지 않는다 — 그 일은
+   `utils/config.py` 한 곳이 하고, 여기서 파일을 또 열면 읽는 길이 둘로 갈린다.
 2. 예외 메시지에 주소를 그대로 담지 않는다. `requests` 의 예외는 주소를 담는데,
    이 저장소는 실행 로그가 공개되는 곳에서 돈다.
 """
@@ -11,19 +11,16 @@ ECOS 는 **인증키를 요청 URL 경로에 넣는다.** 그래서 두 가지�
 from __future__ import annotations
 
 from datetime import date
-from pathlib import Path
 
 import pandas as pd
 import requests
-from dotenv import dotenv_values
 
-from notify.common_constants import PROJECT_ROOT
 from notify.utils.logger import get_logger, mask_credentials
 
 logger = get_logger(__name__)
 
-# 자격증명. git 에서 제외돼 있다
-ENV_FILE_PATH = PROJECT_ROOT / ".env"
+# 인증키가 담긴 환경 변수 이름. **값을 읽는 것은 `utils/config.py` 가 한다** —
+# 여기서 파일을 직접 열면 워크플로에만 없는 `.env` 에 기대게 된다
 ENV_ECOS_API_KEY = "ECOS_API_KEY"
 
 BASE_URL = "https://ecos.bok.or.kr/api"
@@ -37,33 +34,6 @@ MAX_ROWS = 100000
 
 # 조회 제한 시간 (초)
 TIMEOUT_SECONDS = 30
-
-
-def load_api_key(path: Path = ENV_FILE_PATH) -> str:
-    """자격증명 파일에서 ECOS 인증키를 읽는다.
-
-    예외 메시지에는 경로와 키 **이름**만 담고 값은 담지 않는다. 예외 메시지는
-    로그와 스택 트레이스에 남는다.
-
-    Args:
-        path: 자격증명 파일 경로.
-
-    Returns:
-        앞뒤 공백을 제거한 인증키.
-
-    Raises:
-        ValueError: 파일이 없거나 인증키 항목이 비어 있을 때.
-    """
-    if not path.is_file():
-        raise ValueError(f"자격증명 파일이 없습니다: {path}. ecos.bok.or.kr 에서 발급받은 인증키를 넣으세요.")
-
-    raw = dotenv_values(path).get(ENV_ECOS_API_KEY)
-    api_key = raw.strip() if raw else ""
-    if not api_key:
-        raise ValueError(f"{path} 에 {ENV_ECOS_API_KEY} 값이 없습니다.")
-
-    logger.debug(f"인증키를 읽었습니다 (출처: {path})")
-    return api_key
 
 
 def request_json(api_key: str, service: str, *segments: str) -> dict[str, object]:

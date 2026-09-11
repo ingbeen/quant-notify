@@ -122,6 +122,10 @@ https://github.com/settings/personal-access-tokens/new 에서 만듭니다.
 
 GitHub 웹 → **Actions** → 워크플로 선택 → **Run workflow**
 
+> **주간 알림은 월요일이 아닌 날에 돌려도 됩니다.** 「지난주」는 실행 요일이 아니라
+> 달력이 정하므로, 화요일에 복구 실행해도 직전 월~금 구간을 그대로 냅니다.
+> 근거는 [DESIGN.md](DESIGN.md) 4.4 절에 있습니다.
+
 ### 보내지 않고 확인하기 (`dry_run`)
 
 워크플로 넷 모두 **`dry_run` 입력**을 받습니다. 참이면 문구를 **실행 로그에만 찍고

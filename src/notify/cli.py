@@ -17,14 +17,12 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import pandas as pd
-from dotenv import dotenv_values
 
 from notify.alerts import buffer_zone, failure, usdkrw
 from notify.alerts.formatting import format_day
@@ -53,7 +51,6 @@ from notify.common_constants import (
     ECOS_USDKRW_ITEM_CODE,
     ECOS_USDKRW_STAT_CODE,
     POSITIONS_PATH,
-    PROJECT_ROOT,
     REVERSE_RANK_PATH,
     TICKER_QQQ,
     TZ_KST,
@@ -80,11 +77,10 @@ from notify.data.yfinance_client import (
 from notify.notifier import telegram
 from notify.state.positions import load_positions
 from notify.state.reverse_rank import RankEntry, load_reverse_rank
+from notify.utils.config import read_config
 from notify.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-ENV_FILE_PATH = PROJECT_ROOT / ".env"
 
 # 알림 이름
 ALERT_BUFFER_ZONE = "buffer_zone"
@@ -114,28 +110,6 @@ TRADING_WEEK_OFFSET = 4
 RUN_WEEK_OFFSET = 5
 
 
-def _config(name: str, required: bool = True) -> str:
-    """설정값을 읽는다.
-
-    환경 변수를 먼저 보고 없으면 `.env` 를 본다. 워크플로는 환경 변수로 넘긴다.
-
-    Args:
-        name: 설정 이름.
-        required: 없을 때 예외를 낼지 여부.
-
-    Returns:
-        설정값. 없고 필수가 아니면 빈 문자열.
-
-    Raises:
-        ValueError: 필수인데 값이 없을 때.
-    """
-    value = os.environ.get(name) or dotenv_values(ENV_FILE_PATH).get(name) or ""
-    value = value.strip()
-    if required and not value:
-        raise ValueError(f"{name} 가 없습니다. `.env` 또는 워크플로 시크릿에 넣으세요.")
-    return value
-
-
 def _run_counter(repository: str, token: str):
     """실행 이력을 세는 함수를 만든다.
 
@@ -159,8 +133,8 @@ def _health_counter():
     Returns:
         실행 수를 세는 함수.
     """
-    repository = _config("GITHUB_REPOSITORY", required=False)
-    token = _config("GITHUB_TOKEN", required=False)
+    repository = read_config("GITHUB_REPOSITORY", required=False)
+    token = read_config("GITHUB_TOKEN", required=False)
     if repository and token:
         return _run_counter(repository, token)
 
@@ -234,17 +208,17 @@ def run_buffer_zone(now: datetime) -> str | None:
     health = [
         today_health(now.date(), counter),
         previous_day_health(now.date() - timedelta(days=1), counter),
-        _weekly_slot(_last_monday(now.date()), counter),
+        _weekly_slot(_previous_monday(now.date()), counter),
     ]
 
     return buffer_zone.render(sent_at=now, proximities=proximities, holdings=holdings, health=health)
 
 
-def _last_monday(today: date) -> date:
-    """가장 최근에 지나간 월요일을 찾는다.
+def _previous_monday(today: date) -> date:
+    """가장 최근에 지나간 월요일을 찾는다. **점검 줄이 쓴다.**
 
-    오늘이 월요일이면 지난주 월요일을 돌려준다. 주간 알림과 이 알림은 같은 아침에 돌아
-    순서가 정해져 있지 않으므로, 오늘 것을 세면 아직 돌지 않은 실행을 빠진 것으로 읽는다.
+    오늘이 월요일이면 지난주 월요일을 돌려준다. 주간 알림과 버퍼존은 같은 아침에 걸릴 수
+    있고 순서가 정해져 있지 않으므로, 오늘 것을 세면 아직 돌지 않은 실행을 빠진 것으로 읽는다.
 
     Args:
         today: 오늘 날짜.
@@ -254,6 +228,25 @@ def _last_monday(today: date) -> date:
     """
     offset = today.weekday()
     return today - timedelta(days=offset if offset else 7)
+
+
+def _last_week_monday(today: date) -> date:
+    """지난주의 월요일을 찾는다. **주간 요약이 쓴다.**
+
+    **실행 요일에 흔들리지 않는다.** 「가장 최근 월요일」로 잡으면 화요일 이후에 돌릴 때
+    이번 주를 집어 구간의 끝이 미래가 되고, 아직 없는 종가를 요구해 멈춘다 — 정시 트리거가
+    실패했을 때의 수동 복구가 거기서 막힌다 (docs/DESIGN.md 7.2 절).
+
+    **월요일에는 두 뜻이 같은 날을 가리킨다.** 정시 실행이 월요일뿐이라 이 어긋남은
+    평소에 드러나지 않는다.
+
+    Args:
+        today: 오늘 날짜.
+
+    Returns:
+        지난주 월요일.
+    """
+    return today - timedelta(days=today.weekday() + 7)
 
 
 def _weekly_slot(monday: date, counter: RunCounter) -> HealthLine:
@@ -364,6 +357,10 @@ def _unreflected(entry: RankEntry, inputs: _ReverseInputs, ticker: str, calendar
 
     Returns:
         반영되지 않은 도달일. 검사할 날이 없으면 빈 목록.
+
+    Raises:
+        ValueError: 창 안 어느 거래일의 종가가 없을 때. **다음 실행이면 풀릴 수 있는
+            실패다** — 사람이 고쳐야 하는 값 오류는 파일을 읽는 자리에서 이미 걸린다.
     """
     window = unreflected_window(
         entry.data_to,
@@ -419,6 +416,9 @@ def _run_reverse(market: Market, now: datetime) -> str | None:
     # 행을 주면서 종가만 비워 보내는 것이 실측돼 있다 (data 모듈 문서). 그것이 신호 알림을
     # 삼키면 **연 5~8회뿐인 사건을 잃는다.** 갱신 촉구는 다음 실행에서 다시 시도하면 되지만
     # 그날의 신호는 그날만 유효하다.
+    #
+    # **여기서 삼키는 것은 「다음 실행이면 풀리는」 실패뿐이다.** 사람이 고쳐야 하는 값
+    # 오류는 `_load_rank` 가 위에서 이미 막았다 — 이 try 밖이라 삼켜질 수 없다
     try:
         unreflected = _unreflected(entry, inputs, ticker, calendar_code)
     except ValueError as exc:
@@ -521,6 +521,9 @@ def _weekly_extreme_line(symbol_key: str, changes: pd.Series) -> list[usdkrw.Rev
 def run_usdkrw(now: datetime) -> str:
     """원달러 주간 알림 문구를 만든다.
 
+    **지난주 구간은 실행 요일과 무관하다.** 정시 실행은 월요일 아침뿐이지만 수동 복구는
+    그 뒤 아무 날에나 일어난다.
+
     Args:
         now: 실행 시각.
 
@@ -531,7 +534,7 @@ def run_usdkrw(now: datetime) -> str:
     start = end - timedelta(days=USDKRW_LOOKBACK_DAYS)
     # 다른 설정과 같은 길로 읽는다. `.env` 를 직접 열면 워크플로에서 못 찾는다 —
     # Actions 에는 그 파일이 없고 시크릿이 환경 변수로 들어온다
-    api_key = _config(ENV_ECOS_API_KEY)
+    api_key = read_config(ENV_ECOS_API_KEY)
     series = fetch_usdkrw(api_key, ECOS_USDKRW_STAT_CODE, ECOS_USDKRW_ITEM_CODE, start, end)
 
     as_of = series.index[-1]
@@ -545,7 +548,7 @@ def run_usdkrw(now: datetime) -> str:
         for years in USDKRW_WINDOW_YEARS
     ]
 
-    week_start = _last_monday(end)
+    week_start = _last_week_monday(end)
     trading_week_end = week_start + timedelta(days=TRADING_WEEK_OFFSET)
     closes = fetch_closes([YF_TICKER_KODEX, TICKER_QQQ])
     reverses = [
@@ -625,8 +628,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception as exc:
         logger.warning(f"{args.alert} 실행이 실패했습니다: {exc}")
         if not args.dry_run:
-            token = _config("TELEGRAM_BOT_TOKEN", required=False)
-            chat_id = _config("TELEGRAM_CHAT_ID", required=False)
+            token = read_config("TELEGRAM_BOT_TOKEN", required=False)
+            chat_id = read_config("TELEGRAM_CHAT_ID", required=False)
             if token and chat_id:
                 telegram.send_without_raising(token, chat_id, failure.render(args.alert, exc, now))
         else:
@@ -641,7 +644,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(message)
         return 0
 
-    telegram.send(_config("TELEGRAM_BOT_TOKEN"), _config("TELEGRAM_CHAT_ID"), message)
+    telegram.send(read_config("TELEGRAM_BOT_TOKEN"), read_config("TELEGRAM_CHAT_ID"), message)
     return 0
 
 
