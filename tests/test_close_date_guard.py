@@ -237,8 +237,11 @@ class TestBufferZoneNeedsTheTargetClose:
     def _long_series(last_value: float) -> pd.Series:
         """이동평균을 낼 만큼 긴 계열을 만든다.
 
-        TUE 까지 200행이고 그중 TUE 만 104.0, 나머지는 100.0 이다. 그 뒤 WED 한 행이 더 붙는다.
-        target(TUE)까지 잘라 쓰면 SMA 100.02 · 근접도 +3.98% 가 나오고, WED 가 섞이면 달라진다.
+        TUE 까지 200행이고 그중 TUE 만 102.0, 나머지는 100.0 이다. 그 뒤 WED 한 행이 더 붙는다.
+        target(TUE)까지 잘라 쓰면 SMA 100.01 · 근접도 +1.99% 가 나오고, WED 가 섞이면 달라진다.
+
+        근접도를 매수선(+3%) 안에 둔다. 밖이면 SPY·QQQ 가 수치 대신 `매수선 위` 로 나와,
+        WED 가 섞여도 문구가 같아 이 검사가 그 두 종목에서 꺼진다.
 
         Args:
             last_value: WED 행의 종가.
@@ -247,7 +250,7 @@ class TestBufferZoneNeedsTheTargetClose:
             201행 종가 계열.
         """
         days = [TUE - timedelta(days=offset) for offset in range(199, -1, -1)] + [WED]
-        return _series(days, [100.0] * 199 + [104.0, last_value])
+        return _series(days, [100.0] * 199 + [102.0, last_value])
 
     def _run(self, monkeypatch: pytest.MonkeyPatch, closes: dict[str, pd.Series]) -> str | None:
         """점검 줄 조회를 막고 이동평균 알림을 만든다.
@@ -273,7 +276,7 @@ class TestBufferZoneNeedsTheTargetClose:
         message = self._run(monkeypatch, closes)
 
         assert message is not None
-        assert message.count("+3.98%") == len(cli.BUFFER_ZONE_TICKERS)
+        assert message.count("+1.99%") == len(cli.BUFFER_ZONE_TICKERS)
 
     def test_moving_average_ignores_rows_after_the_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """이동평균 창도 target 에서 끊는다.

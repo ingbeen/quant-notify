@@ -382,8 +382,8 @@ class TestBufferZone:
             "<b>QBT</b> · 09-04 (금) 07:30\n"
             "\n"
             "<b>MA 근접도</b>\n"
-            "SPY +11.56%\n"
-            "QQQ +19.38%\n"
+            "SPY 매수선 위\n"
+            "QQQ 매수선 위\n"
             "GLD +2.46%\n"
             "TLT -0.98%\n"
             "\n"
@@ -418,6 +418,74 @@ class TestBufferZone:
                 holdings=[],
                 health=[],
             )
+
+    @staticmethod
+    def _proximity_row(ticker: str, rate: float) -> str:
+        """근접도 한 종목만 넣고 그 종목의 줄을 꺼낸다.
+
+        Args:
+            ticker: 종목.
+            rate: 근접도. 비율.
+
+        Returns:
+            그 종목의 줄.
+        """
+        text = render_buffer_zone(
+            sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
+            proximities=[ProximityLine(ticker, rate)],
+            holdings=[],
+            health=[],
+        )
+        return next(row for row in text.split("\n") if row.startswith(f"{ticker} "))
+
+    def test_matches_the_documented_variant(self) -> None:
+        """선 밖과 선 안이 섞인 변형이 정본 블록과 글자 단위로 같다."""
+        text = render_buffer_zone(
+            sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
+            proximities=[
+                ProximityLine("SPY", -0.0612),
+                ProximityLine("QQQ", -0.0342),
+                ProximityLine("GLD", 0.0246),
+                ProximityLine("TLT", -0.0098),
+            ],
+            holdings=[],
+            health=[],
+        )
+
+        assert "<b>MA 근접도</b>\nSPY 매도선 아래\nQQQ -3.42%\nGLD +2.46%\nTLT -0.98%\n" in text
+
+    def test_rate_between_the_lines_is_shown(self) -> None:
+        """두 선 사이면 수치를 낸다."""
+        for ticker in ("SPY", "QQQ"):
+            assert self._proximity_row(ticker, 0.0184) == f"{ticker} +1.84%"
+
+    def test_rate_on_a_line_is_still_between(self) -> None:
+        """정확히 선 위인 날은 아직 넘지 않았다.
+
+        quant 의 판정이 `종가 > 상단` · `종가 < 하단` 으로 등호를 넣지 않는다.
+        """
+        for ticker in ("SPY", "QQQ"):
+            assert self._proximity_row(ticker, 0.03) == f"{ticker} +3.00%"
+            assert self._proximity_row(ticker, -0.05) == f"{ticker} -5.00%"
+
+    def test_above_the_buy_line_reads_as_position(self) -> None:
+        """매수선을 넘으면 수치 대신 위치를 적는다."""
+        for ticker in ("SPY", "QQQ"):
+            assert self._proximity_row(ticker, 0.0301) == f"{ticker} 매수선 위"
+
+    def test_below_the_sell_line_reads_as_position(self) -> None:
+        """매도선 아래면 수치 대신 위치를 적는다. 폭락일에도 방향이 드러난다."""
+        for ticker in ("SPY", "QQQ"):
+            assert self._proximity_row(ticker, -0.0501) == f"{ticker} 매도선 아래"
+
+    def test_reference_tickers_always_show_the_rate(self) -> None:
+        """GLD·TLT 는 선 밖이어도 수치를 낸다.
+
+        Q-2-2XS 에서 B&H 라 두 선이 적용되지 않는다. 문구를 붙이면 매매하지 않는 종목에
+        행동을 암시한다.
+        """
+        assert self._proximity_row("GLD", 0.10) == "GLD +10.00%"
+        assert self._proximity_row("TLT", -0.08) == "TLT -8.00%"
 
 
 class TestUsdKrw:

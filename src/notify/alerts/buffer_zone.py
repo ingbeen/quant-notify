@@ -14,7 +14,12 @@ import pandas as pd
 
 from notify.alerts.formatting import bold, format_day, format_rate, format_weight
 from notify.alerts.health import HealthLine
-from notify.common_constants import MA_PERIOD
+from notify.common_constants import (
+    BUFFER_ZONE_SIGNAL_TICKERS,
+    BUY_BUFFER_ZONE_RATE,
+    MA_PERIOD,
+    SELL_BUFFER_ZONE_RATE,
+)
 
 
 def sma(closes: pd.Series, period: int = MA_PERIOD) -> float:
@@ -110,6 +115,28 @@ class HoldingLine:
     weight_ratio: float
 
 
+def _proximity_text(line: ProximityLine) -> str:
+    """근접도를 표시할 말로 바꾼다.
+
+    매수선·매도선으로 매매하는 종목은 두 선 사이일 때만 수치를 내고, 밖이면 어느 쪽인지만
+    적는다. 매매가 선을 넘었는지로만 갈려 선에서 먼 날의 수치는 판단에 쓰이지 않는다.
+    정확히 선 위인 날은 선 안이다 — quant 판정이 등호를 넣지 않는다 (docs/DESIGN.md 4.5 절).
+
+    Args:
+        line: 한 종목의 근접도.
+
+    Returns:
+        수치 또는 위치.
+    """
+    rate = line.proximity_rate
+    if line.ticker in BUFFER_ZONE_SIGNAL_TICKERS:
+        if rate > BUY_BUFFER_ZONE_RATE:
+            return "매수선 위"
+        if rate < -SELL_BUFFER_ZONE_RATE:
+            return "매도선 아래"
+    return format_rate(rate)
+
+
 def _proximity_rows(proximities: Sequence[ProximityLine]) -> list[str]:
     """근접도 줄을 만든다. 한 줄에 한 종목씩 쌓는다.
 
@@ -119,7 +146,7 @@ def _proximity_rows(proximities: Sequence[ProximityLine]) -> list[str]:
     Returns:
         줄 목록.
     """
-    return [f"{line.ticker} {format_rate(line.proximity_rate)}" for line in proximities]
+    return [f"{line.ticker} {_proximity_text(line)}" for line in proximities]
 
 
 def _holding_rows(holdings: Sequence[HoldingLine]) -> list[str]:

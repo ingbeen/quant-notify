@@ -10,7 +10,15 @@ import pandas as pd
 import pytest
 
 from notify.alerts.buffer_zone import ma_proximity, position_weights, sma
-from notify.common_constants import MA_PERIOD
+from notify.common_constants import (
+    BUFFER_ZONE_SIGNAL_TICKERS,
+    BUFFER_ZONE_TICKERS,
+    BUY_BUFFER_ZONE_RATE,
+    MA_PERIOD,
+    SELL_BUFFER_ZONE_RATE,
+    TICKER_QQQ,
+    TICKER_SPY,
+)
 
 
 def _closes(value: float, days: int) -> pd.Series:
@@ -92,6 +100,30 @@ class TestProximity:
         """이동평균이 0 이면 나눌 수 없으므로 예외를 낸다."""
         with pytest.raises(ValueError):
             ma_proximity(close=100.0, ma=0.0)
+
+
+class TestBufferZoneLines:
+    """매수선·매도선.
+
+    정본은 quant 의 확정 파라미터다. import 하지 않고 옮겨 적었으므로 정본과 갈라지면
+    알림이 다른 선을 기준으로 수치를 가린다 — 형태로는 정상이라 티가 나지 않는다.
+    """
+
+    def test_buy_line_is_three_percent_above(self) -> None:
+        """매수선은 이동평균의 3% 위다. quant `FIXED_4P_BUY_BUFFER_ZONE_PCT`."""
+        assert BUY_BUFFER_ZONE_RATE == 0.03
+
+    def test_sell_line_is_five_percent_below(self) -> None:
+        """매도선은 이동평균의 5% 아래다. quant `FIXED_4P_SELL_BUFFER_ZONE_PCT`."""
+        assert SELL_BUFFER_ZONE_RATE == 0.05
+
+    def test_lines_apply_to_spy_and_qqq_only(self) -> None:
+        """두 선은 SPY·QQQ 에만 걸린다. Q-2-2XS 에서 GLD·TLT 는 B&H 다."""
+        assert BUFFER_ZONE_SIGNAL_TICKERS == (TICKER_SPY, TICKER_QQQ)
+
+    def test_signal_tickers_are_shown_tickers(self) -> None:
+        """선을 거는 종목은 근접도를 내는 종목 안에 있다. 밖에 있으면 선이 조용히 꺼진다."""
+        assert set(BUFFER_ZONE_SIGNAL_TICKERS) <= set(BUFFER_ZONE_TICKERS)
 
 
 class TestWeights:
