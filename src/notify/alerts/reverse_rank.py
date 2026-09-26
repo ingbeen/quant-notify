@@ -79,8 +79,8 @@ def signal_prices(prev_close: float, thresholds: RankThresholds, margin_rate: fl
         raise ValueError(f"전일 종가는 0 보다 커야 합니다. 지금 값: {prev_close}")
 
     return SignalPrices(
-        surge=prev_close * (1 + thresholds.surge_20th - margin_rate),
-        plunge=prev_close * (1 + thresholds.plunge_20th + margin_rate),
+        surge=prev_close * (1 + thresholds.surge_cut - margin_rate),
+        plunge=prev_close * (1 + thresholds.plunge_cut + margin_rate),
     )
 
 
@@ -140,22 +140,22 @@ class UnreflectedDay:
     change_rate: float
 
 
-def reached_threshold(change_rate: float, rate_20th: float) -> bool:
+def reached_threshold(change_rate: float, cut_rate: float) -> bool:
     """등락률이 순위 등락률에 닿았는지 본다.
 
     폭등은 이상, 폭락은 이하다. **순위 등락률의 부호가 방향을 말한다** —
-    폭등 20위는 양수, 폭락 20위는 음수다.
+    폭등 컷 값은 양수, 폭락 컷 값은 음수다.
 
     Args:
         change_rate: 견줄 등락률. 비율.
-        rate_20th: 20위 등락률. 비율.
+        cut_rate: 순위 컷 등락률. 비율.
 
     Returns:
         닿았으면 True.
     """
-    if rate_20th >= 0:
-        return change_rate >= rate_20th
-    return change_rate <= rate_20th
+    if cut_rate >= 0:
+        return change_rate >= cut_rate
+    return change_rate <= cut_rate
 
 
 def unreflected_window(data_to: date, last_confirmed: date, first_computable: date) -> tuple[date, date] | None:
@@ -164,8 +164,8 @@ def unreflected_window(data_to: date, last_confirmed: date, first_computable: da
     `data_to` 는 순위에 이미 들어간 마지막 날이라 그 다음 날부터가 반영되지 않은 구간이다.
     **창 길이를 따로 정하지 않는다** — 길이를 고정하면 그 밖으로 나간 도달일이 조용히 묻힌다.
 
-    받은 시세가 `data_to` 보다 짧으면 시작을 당기고 **경고하지 않는다.** QQQ 는 20위 값이
-    몇 년에 한 번 바뀌므로(정본 1.5 절: 최근 5년간 2회) 1년 넘은 `data_to` 가 정상이고,
+    받은 시세가 `data_to` 보다 짧으면 시작을 당기고 **경고하지 않는다.** QQQ 는 순위 컷 값이
+    몇 년에 한 번 바뀌므로(정본 1.5 절) 1년 넘은 `data_to` 가 정상이고,
     매일 도는 판정이 그 사이를 이미 덮었다.
 
     **`data_to` 가 마지막 확정 종가일에 닿아 있거나 그 뒤면 검사할 날이 없다.** 장중 판정은
@@ -194,8 +194,8 @@ def unreflected_days(changes: pd.Series, thresholds: RankThresholds, data_to: da
     """순위에 반영되지 않은 도달일을 낸다.
 
     **`data_to` 를 여기서 한 번 더 견준다.** 창이 이미 그 뒤에서 시작하므로 중복이지만,
-    창을 고치다 이 가드가 함께 사라지는 것을 막는다. 20위 «안에 든» 날은 갱신한 뒤에도
-    도달 조건을 만족한다 — 새 20위가 그 등락률 자신이거나 그보다 낮기 때문이다.
+    창을 고치다 이 가드가 함께 사라지는 것을 막는다. 순위 컷 «안에 든» 날은 갱신한 뒤에도
+    도달 조건을 만족한다 — 새 컷 값이 그 등락률 자신이거나 그보다 덜 극단적이기 때문이다.
     그래서 도달 여부만 보면 **갱신해도 경고가 꺼지지 않는다.**
 
     Args:
@@ -220,9 +220,9 @@ def unreflected_days(changes: pd.Series, thresholds: RankThresholds, data_to: da
             continue
 
         change_rate = float(rate)
-        if reached_threshold(change_rate, thresholds.surge_20th):
+        if reached_threshold(change_rate, thresholds.surge_cut):
             direction = Direction.SURGE
-        elif reached_threshold(change_rate, thresholds.plunge_20th):
+        elif reached_threshold(change_rate, thresholds.plunge_cut):
             direction = Direction.PLUNGE
         else:
             continue
@@ -325,7 +325,7 @@ def render(
 
     신호 가격과 그 순위 등락률을 함께 낸다. 지금 값만 보여주면 얼마나 가까운지 알 수 없다.
 
-    **신호가 났으면 순위 갱신이 필요할 수 있다.** 20위 안에 새로 드는 것이 곧 신호의
+    **신호가 났으면 순위 갱신이 필요할 수 있다.** 순위 컷 안에 새로 드는 것이 곧 신호의
     정의이므로(정본 1.5 절), 그 블록을 같은 알림에 붙여 사용자가 연결을 기억하지
     않게 한다.
 
@@ -348,13 +348,13 @@ def render(
     if judgement.direction is None:
         raise RuntimeError("내부 불변조건 위반: 방향이 없는데 문구를 만들려 했습니다.")
 
-    # 연 5~8회만 오는 알림이라 온 것 자체가 사건이다. 제목을 강조한다
+    # 연 몇 회만 오는 알림이라 온 것 자체가 사건이다. 제목을 강조한다
     heading = alert(f"역방향 · {symbol} · {_DIRECTION_WORD[judgement.direction]} {_state_word(market, judgement.state)}")
 
     money = format_krw if market is Market.KR else format_usd
     is_surge = judgement.direction is Direction.SURGE
     signal_price = prices.surge if is_surge else prices.plunge
-    signal_rate = thresholds.surge_20th if is_surge else thresholds.plunge_20th
+    signal_rate = thresholds.surge_cut if is_surge else thresholds.plunge_cut
 
     rows = [
         f"{label} {money(price)} {format_rate(rate)}"

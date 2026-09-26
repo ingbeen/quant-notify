@@ -11,23 +11,23 @@ import pytest
 
 @pytest.fixture
 def kodex_thresholds() -> dict[str, float]:
-    """KODEX 200 의 순위 등락률. 값은 비율 (0.0610 = +6.10%)."""
+    """KODEX 200 의 순위 등락률. 값은 비율 (0.0769 = +7.69%)."""
     return {
         "surge_1st": 0.2417,
-        "surge_20th": 0.0610,
+        "surge_cut": 0.0769,
         "plunge_1st": -0.1246,
-        "plunge_20th": -0.0631,
+        "plunge_cut": -0.0817,
     }
 
 
 @pytest.fixture
 def qqq_thresholds() -> dict[str, float]:
-    """QQQ 의 순위 등락률. 값은 비율 (0.0742 = +7.42%)."""
+    """QQQ 의 순위 등락률. 값은 비율 (0.0957 = +9.57%)."""
     return {
         "surge_1st": 0.1684,
-        "surge_20th": 0.0742,
+        "surge_cut": 0.0957,
         "plunge_1st": -0.1198,
-        "plunge_20th": -0.0687,
+        "plunge_cut": -0.0782,
     }
 
 

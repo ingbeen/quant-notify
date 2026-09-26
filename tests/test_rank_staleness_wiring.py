@@ -5,7 +5,7 @@
 
 - **거래소 달력을 바꿔 끼우면** 한국 휴장이 미국 휴장으로 판정돼 검사 구간이 달라진다
 - **마지막 확정 종가일을 오늘로 주면** 아직 종가가 없는 날이 검사에 들어온다
-- **검사가 실패하면 신호 알림까지 삼킨다** — 연 5~8회뿐인 사건을 잃는다
+- **검사가 실패하면 신호 알림까지 삼킨다** — 연 몇 회뿐인 사건을 잃는다
 - **「검사할 날이 없다」를 오류로 읽으면** 마감 뒤 갱신한 정상 파일이 실패 알림을 낸다
 
 네 경우 모두 판정 함수만 보는 테스트로는 전부 통과한다.
@@ -93,6 +93,7 @@ def _install(
         "_load_rank",
         lambda key: RankEntry(
             thresholds=RankThresholds(**thresholds),
+            rank_cut=10,
             data_from=date(2002, 10, 15),
             data_to=data_to,
         ),
@@ -115,17 +116,17 @@ class TestKoreaUsesItsOwnCalendarAndYesterday:
         _install(
             monkeypatch,
             KODEX,
-            _series([FRI, MON, TUE], [100000.0, 107000.0, 114500.0], tz=SEOUL),
+            _series([FRI, MON, TUE], [100000.0, 108000.0, 116700.0], tz=SEOUL),
             kodex_thresholds,
             data_to=FRI,
-            intraday=107000.0,
+            intraday=108000.0,
         )
 
         text = cli._run_reverse(Market.KR, _at(TUE, 14, 30))
 
         assert text is not None
         assert "순위 갱신 필요" in text
-        assert "09-07 (월) 폭등 +7.00%" in text
+        assert "09-07 (월) 폭등 +8.00%" in text
 
     def test_does_not_scan_today(self, monkeypatch: pytest.MonkeyPatch, kodex_thresholds: dict[str, float]) -> None:
         """오늘은 종가가 아직 없으므로 검사에 넣지 않는다.
@@ -136,18 +137,18 @@ class TestKoreaUsesItsOwnCalendarAndYesterday:
         _install(
             monkeypatch,
             KODEX,
-            _series([FRI, MON, TUE], [100000.0, 107000.0, 114500.0], tz=SEOUL),
+            _series([FRI, MON, TUE], [100000.0, 108000.0, 116700.0], tz=SEOUL),
             kodex_thresholds,
             data_to=FRI,
-            intraday=107000.0,
+            intraday=108000.0,
         )
 
         text = cli._run_reverse(Market.KR, _at(TUE, 14, 30))
 
         assert text is not None
-        assert "09-07 (월) 폭등 +7.00%" in text
-        # 09-08 을 검사에 넣었다면 114,500 / 107,000 - 1 = +7.01% 줄이 함께 나온다
-        assert "+7.01%" not in text
+        assert "09-07 (월) 폭등 +8.00%" in text
+        # 09-08 을 검사에 넣었다면 116,700 / 108,000 - 1 = +8.06% 줄이 함께 나온다
+        assert "+8.06%" not in text
 
     def test_stays_silent_when_the_rank_is_current(
         self, monkeypatch: pytest.MonkeyPatch, kodex_thresholds: dict[str, float]
@@ -156,10 +157,10 @@ class TestKoreaUsesItsOwnCalendarAndYesterday:
         _install(
             monkeypatch,
             KODEX,
-            _series([FRI, MON, TUE], [100000.0, 107000.0, 114500.0], tz=SEOUL),
+            _series([FRI, MON, TUE], [100000.0, 108000.0, 116700.0], tz=SEOUL),
             kodex_thresholds,
             data_to=MON,
-            intraday=107000.0,
+            intraday=108000.0,
         )
 
         assert cli._run_reverse(Market.KR, _at(TUE, 14, 30)) is None
@@ -179,7 +180,7 @@ class TestUnitedStatesUsesItsOwnCalendarAndToday:
         _install(
             monkeypatch,
             QQQ,
-            _series([FRI, TUE], [574.70, 619.50], tz=NEW_YORK),
+            _series([FRI, TUE], [574.70, 632.00], tz=NEW_YORK),
             qqq_thresholds,
             data_to=FRI,
         )
@@ -189,7 +190,7 @@ class TestUnitedStatesUsesItsOwnCalendarAndToday:
         assert text is not None
         assert "폭등 발생" in text
         assert "순위 갱신 필요" in text
-        assert "09-08 (화) 폭등 +7.80%" in text
+        assert "09-08 (화) 폭등 +9.97%" in text
         assert "미확정" not in text
 
 
@@ -202,7 +203,7 @@ class TestScanFailureNeverSwallowsTheSignal:
         """창 안에 종가 공백이 있어도 신호를 보낸다. 블록만 빠진다.
 
         yfinance 는 거래일 행을 주면서 종가만 비워 보내는 일이 있고, 창은 최대 1년이라
-        그 확률이 창 길이에 비례한다. 검사를 신호보다 먼저 두면 **연 5~8회뿐인 사건을
+        그 확률이 창 길이에 비례한다. 검사를 신호보다 먼저 두면 **연 몇 회뿐인 사건을
         공백 하나에 잃는다.**
 
         09-03 이 빠진 계열을 준다. 창이 09-02 부터 열리므로 공백이 창 **안**에 들어온다 —
@@ -211,7 +212,7 @@ class TestScanFailureNeverSwallowsTheSignal:
         _install(
             monkeypatch,
             QQQ,
-            _series([GAP_START, GAP_NEXT, FRI, TUE], [500.0, 510.0, 574.70, 619.50], tz=NEW_YORK),
+            _series([GAP_START, GAP_NEXT, FRI, TUE], [500.0, 510.0, 574.70, 632.00], tz=NEW_YORK),
             qqq_thresholds,
             data_to=GAP_START,
         )
@@ -247,7 +248,7 @@ class TestFreshRankDateIsNotAnError:
 
     장중 판정은 마지막 확정 종가일이 **전일**이다. 그래서 「`data_to` 가 마지막 확정
     종가일보다 뒤인가」로 재면, 사용자가 마감 뒤 재계산해 오늘 날짜로 올린 **정상 파일**이
-    걸린다 — 연 5~8회뿐인 신호 대신 실패 알림이 간다.
+    걸린다 — 연 몇 회뿐인 신호 대신 실패 알림이 간다.
 
     **검사할 날이 없는 것과 값이 틀린 것은 다르다.** 말이 안 되는 미래 날짜는 파일을
     읽는 자리가 막고(`tests/test_state_loading.py`), 여기서는 조용히 비운다.
@@ -260,10 +261,10 @@ class TestFreshRankDateIsNotAnError:
         _install(
             monkeypatch,
             KODEX,
-            _series([FRI, MON, TUE], [100000.0, 107000.0, 114500.0], tz=SEOUL),
+            _series([FRI, MON, TUE], [100000.0, 108000.0, 116700.0], tz=SEOUL),
             kodex_thresholds,
             data_to=TUE,
-            intraday=107000.0,
+            intraday=108000.0,
         )
 
         assert cli._run_reverse(Market.KR, _at(TUE, 14, 30)) is None
@@ -275,10 +276,10 @@ class TestFreshRankDateIsNotAnError:
         _install(
             monkeypatch,
             KODEX,
-            _series([FRI, MON, TUE], [100000.0, 107000.0, 114500.0], tz=SEOUL),
+            _series([FRI, MON, TUE], [100000.0, 108000.0, 116700.0], tz=SEOUL),
             kodex_thresholds,
             data_to=TUE,
-            intraday=115000.0,
+            intraday=117000.0,
         )
 
         text = cli._run_reverse(Market.KR, _at(TUE, 14, 30))

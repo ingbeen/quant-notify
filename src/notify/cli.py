@@ -384,7 +384,7 @@ def _run_reverse(market: Market, now: datetime) -> str | None:
     **두 시장은 보는 값이 다르다** — 한국은 그날 장중 현재가를, 미국은 직전 거래일
     종가를 본다. 판정과 문구는 같다.
 
-    **신호가 멀어도 순위가 낡았으면 보낸다.** 20위 값이 바뀌는 날은 반드시 신호일인데
+    **신호가 멀어도 순위가 낡았으면 보낸다.** 순위 컷 값이 바뀌는 날은 반드시 신호일인데
     (정본 1.5 절), 한국은 장중 판정이라 종가 기준으로만 신호인 날을 놓친다. 그 날을
     침묵으로 두면 사용자가 낡은 임계로 계속 판정받는다.
 
@@ -414,7 +414,7 @@ def _run_reverse(market: Market, now: datetime) -> str | None:
     #
     # 검사가 보는 창은 최대 1년이고 그 안의 종가 공백 하나에도 멈춘다 — yfinance 가 거래일
     # 행을 주면서 종가만 비워 보내는 것이 실측돼 있다 (data 모듈 문서). 그것이 신호 알림을
-    # 삼키면 **연 5~8회뿐인 사건을 잃는다.** 갱신 촉구는 다음 실행에서 다시 시도하면 되지만
+    # 삼키면 **연 몇 회뿐인 사건을 잃는다.** 갱신 촉구는 다음 실행에서 다시 시도하면 되지만
     # 그날의 신호는 그날만 유효하다.
     #
     # **여기서 삼키는 것은 「다음 실행이면 풀리는」 실패뿐이다.** 사람이 고쳐야 하는 값
@@ -504,14 +504,16 @@ def _weekly_extreme_line(symbol_key: str, changes: pd.Series) -> list[usdkrw.Rev
         usdkrw.ReverseLine(
             "폭등",
             entry.thresholds.surge_1st,
-            entry.thresholds.surge_20th,
+            entry.rank_cut,
+            entry.thresholds.surge_cut,
             extremes.highest.change_rate,
             extremes.highest.on,
         ),
         usdkrw.ReverseLine(
             "폭락",
             entry.thresholds.plunge_1st,
-            entry.thresholds.plunge_20th,
+            entry.rank_cut,
+            entry.thresholds.plunge_cut,
             extremes.lowest.change_rate,
             extremes.lowest.on,
         ),

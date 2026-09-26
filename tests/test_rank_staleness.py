@@ -2,8 +2,8 @@
 
 이 판정은 두 방향으로 조용히 틀릴 수 있어 테스트를 먼저 세운다.
 
-하나는 **경고가 꺼지지 않는 것**이다. 20위 안에 든 날은 갱신한 뒤에도
-`등락률 >= 새 20위` 를 만족한다 — 새 20위가 그 값 자신이거나 그보다 낮기 때문이다.
+하나는 **경고가 꺼지지 않는 것**이다. 순위 컷 안에 든 날은 갱신한 뒤에도
+`등락률 >= 새 컷 값` 을 만족한다 — 새 컷 값이 그 값 자신이거나 그보다 낮기 때문이다.
 그래서 도달 여부만 보면 경고가 영구히 켜지고, 흔해진 경고는 정작 사건일 때 묻힌다.
 
 다른 하나는 **검사가 조용히 꺼지는 것**이다. 사람이 손으로 적는 파일이라
@@ -27,7 +27,7 @@ from notify.alerts.reverse_rank import (
 )
 from notify.state.reverse_rank import RankThresholds
 
-# 순위 값이 매겨진 마지막 날. `state/reverse_rank.toml` 의 kodex200 실측값이다
+# 순위 값이 매겨진 마지막 날
 DATA_TO = date(2026, 8, 26)
 
 # 마지막 확정 종가일. 한국 역방향이 장중에 보는 직전 거래일이다
@@ -84,7 +84,7 @@ class TestUnreflectedWindow:
     def test_window_starts_at_the_first_computable_day_when_data_to_is_older(self) -> None:
         """`data_to` 가 받은 시세보다 오래되면 시작이 첫 계산가능일로 당겨진다.
 
-        QQQ 는 최근 5년간 20위 값이 2회만 바뀌었다(정본 1.5 절) — 1년 넘은 `data_to` 가
+        QQQ 는 순위 컷 값이 몇 년에 한 번 바뀐다(정본 1.5 절) — 1년 넘은 `data_to` 가
         정상이다. 그래서 여기서 경고를 내지 않고 조용히 당긴다.
         """
         window = unreflected_window(date(2024, 6, 3), LAST_CONFIRMED, FIRST_COMPUTABLE)
@@ -103,9 +103,9 @@ class TestUnreflectedDays:
     """도달 판정 — 창 안에서 무엇을 잡는가."""
 
     def test_catches_a_day_that_reaches_the_surge_rank(self, kodex_thresholds: dict[str, float]) -> None:
-        """20위에 도달했고 `data_to` 보다 뒤인 날을 잡는다."""
+        """순위 컷에 도달했고 `data_to` 보다 뒤인 날을 잡는다."""
         signal_day = date(2026, 9, 3)
-        changes = _changes({signal_day: kodex_thresholds["surge_20th"] + 0.007})
+        changes = _changes({signal_day: kodex_thresholds["surge_cut"] + 0.007})
 
         found = unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO)
 
@@ -114,15 +114,15 @@ class TestUnreflectedDays:
     def test_catches_a_day_that_reaches_the_plunge_rank(self, kodex_thresholds: dict[str, float]) -> None:
         """폭락도 같은 규칙으로 잡는다. 부등호가 반대다."""
         signal_day = date(2026, 9, 3)
-        changes = _changes({signal_day: kodex_thresholds["plunge_20th"] - 0.007})
+        changes = _changes({signal_day: kodex_thresholds["plunge_cut"] - 0.007})
 
         found = unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO)
 
         assert [(day.on, day.direction) for day in found] == [(signal_day, Direction.PLUNGE)]
 
     def test_ignores_a_day_already_inside_the_rank(self, kodex_thresholds: dict[str, float]) -> None:
-        """20위에 도달했지만 `data_to` 이하인 날은 이미 반영된 날이다."""
-        changes = _changes({date(2026, 8, 20): kodex_thresholds["surge_20th"] + 0.007})
+        """순위 컷에 도달했지만 `data_to` 이하인 날은 이미 반영된 날이다."""
+        changes = _changes({date(2026, 8, 20): kodex_thresholds["surge_cut"] + 0.007})
 
         assert unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO) == []
 
@@ -131,28 +131,28 @@ class TestUnreflectedDays:
 
         경계를 `>=` 로 두면 갱신 직후에도 그 날이 계속 잡혀 경고가 꺼지지 않는다.
         """
-        changes = _changes({DATA_TO: kodex_thresholds["surge_20th"] + 0.007})
+        changes = _changes({DATA_TO: kodex_thresholds["surge_cut"] + 0.007})
 
         assert unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO) == []
 
     def test_exact_equality_counts_as_reached(self, kodex_thresholds: dict[str, float]) -> None:
-        """20위 값에 정확히 닿으면 동률도 도달이다 — 정본 1.5 절 「도달하거나 넘으면」."""
+        """순위 컷 값에 정확히 닿으면 동률도 도달이다 — 정본 1.5 절 「도달하거나 넘으면」."""
         signal_day = date(2026, 9, 3)
-        changes = _changes({signal_day: kodex_thresholds["surge_20th"]})
+        changes = _changes({signal_day: kodex_thresholds["surge_cut"]})
 
         found = unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO)
 
         assert [day.on for day in found] == [signal_day]
 
     def test_ignores_a_day_short_of_the_rank(self, kodex_thresholds: dict[str, float]) -> None:
-        """20위에 못 미치는 날은 순위를 바꾸지 않으므로 잡지 않는다."""
-        changes = _changes({date(2026, 9, 3): kodex_thresholds["surge_20th"] - 0.001})
+        """순위 컷에 못 미치는 날은 순위를 바꾸지 않으므로 잡지 않는다."""
+        changes = _changes({date(2026, 9, 3): kodex_thresholds["surge_cut"] - 0.001})
 
         assert unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO) == []
 
     def test_carries_the_change_rate_of_each_day(self, kodex_thresholds: dict[str, float]) -> None:
         """문구가 등락률을 보여주므로 판정이 그 값을 함께 낸다."""
-        rate = kodex_thresholds["surge_20th"] + 0.007
+        rate = kodex_thresholds["surge_cut"] + 0.007
         changes = _changes({date(2026, 9, 3): rate})
 
         found = unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO)
@@ -165,9 +165,9 @@ class TestUnreflectedDays:
         second = date(2026, 9, 8)
         changes = _changes(
             {
-                first: kodex_thresholds["surge_20th"] + 0.002,
+                first: kodex_thresholds["surge_cut"] + 0.002,
                 date(2026, 9, 4): 0.0,
-                second: kodex_thresholds["plunge_20th"] - 0.002,
+                second: kodex_thresholds["plunge_cut"] - 0.002,
             }
         )
 
@@ -186,11 +186,11 @@ class TestIndependentRanking:
     def test_surge_side_does_not_borrow_the_plunge_threshold(self, kodex_thresholds: dict[str, float]) -> None:
         """폭락 임계의 절대값에 못 미쳐도 폭등 임계를 넘으면 잡는다.
 
-        KODEX 200 은 폭등 6.10% · 폭락 -6.31% 라 두 값의 크기가 다르다.
+        KODEX 200 은 폭등 7.69% · 폭락 -8.17% 라 두 값의 크기가 다르다.
         절대값 하나로 합치면 이 구간이 통째로 묻힌다.
         """
-        rate = kodex_thresholds["surge_20th"] + 0.001
-        assert rate < abs(kodex_thresholds["plunge_20th"])
+        rate = kodex_thresholds["surge_cut"] + 0.001
+        assert rate < abs(kodex_thresholds["plunge_cut"])
         changes = _changes({date(2026, 9, 3): rate})
 
         found = unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO)
@@ -199,8 +199,8 @@ class TestIndependentRanking:
 
     def test_plunge_side_does_not_borrow_the_surge_threshold(self, kodex_thresholds: dict[str, float]) -> None:
         """폭등 임계만큼 내려도 폭락 임계에 못 미치면 잡지 않는다."""
-        rate = -(kodex_thresholds["surge_20th"] + 0.001)
-        assert abs(rate) < abs(kodex_thresholds["plunge_20th"])
+        rate = -(kodex_thresholds["surge_cut"] + 0.001)
+        assert abs(rate) < abs(kodex_thresholds["plunge_cut"])
         changes = _changes({date(2026, 9, 3): rate})
 
         assert unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO) == []
@@ -227,18 +227,18 @@ class TestUpdateClearsTheNotice:
     def test_the_same_day_is_not_caught_after_the_rank_is_updated(self, kodex_thresholds: dict[str, float]) -> None:
         """갱신 뒤에는 그 날이 더는 잡히지 않는다.
 
-        **`data_to` 를 함께 보지 않으면 이 테스트가 깨진다.** 그 날이 20위 안에 들어오면
-        새 20위는 그 등락률 자신이거나 그보다 낮아지므로, 도달 조건은 갱신 뒤에도
-        계속 참이다. 여기서는 최악(동률)을 준다 — 새 20위를 그 값 자신으로 둔다.
+        **`data_to` 를 함께 보지 않으면 이 테스트가 깨진다.** 그 날이 순위 컷 안에 들어오면
+        새 컷 값은 그 등락률 자신이거나 그보다 낮아지므로, 도달 조건은 갱신 뒤에도
+        계속 참이다. 여기서는 최악(동률)을 준다 — 새 컷 값을 그 값 자신으로 둔다.
         """
         signal_day = date(2026, 9, 3)
-        rate = kodex_thresholds["surge_20th"] + 0.007
+        rate = kodex_thresholds["surge_cut"] + 0.007
         changes = _changes({signal_day: rate})
 
         before = unreflected_days(changes, RankThresholds(**kodex_thresholds), DATA_TO)
         assert [day.on for day in before] == [signal_day]
 
-        updated = RankThresholds(**{**kodex_thresholds, "surge_20th": rate})
+        updated = RankThresholds(**{**kodex_thresholds, "surge_cut": rate})
         after = unreflected_days(changes, updated, signal_day)
 
         assert after == []

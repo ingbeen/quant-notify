@@ -125,14 +125,16 @@ class ReverseLine:
     Attributes:
         direction: 폭등 또는 폭락.
         rate_1st: 1위 등락률.
-        rate_20th: 20위 등락률.
+        rank_cut: 순위 컷. 문구의 `N위` 가 된다.
+        rate_cut: 순위 컷 등락률.
         extreme_rate: 지난주 값.
         extreme_on: 그 값이 나온 날.
     """
 
     direction: str
     rate_1st: float
-    rate_20th: float
+    rank_cut: int
+    rate_cut: float
     extreme_rate: float
     extreme_on: date
 
@@ -195,10 +197,10 @@ def _extreme_row(line: ReverseLine) -> str:
         지난주 값 줄.
     """
     value = f"{format_rate(line.extreme_rate)} {format_day_paren(line.extreme_on)}"
-    if reached_threshold(line.extreme_rate, line.rate_20th):
+    if reached_threshold(line.extreme_rate, line.rate_cut):
         return alert(f"지난주 신호 {value}")
 
-    label = "지난주 최고" if line.rate_20th >= 0 else "지난주 최저"
+    label = "지난주 최고" if line.rate_cut >= 0 else "지난주 최저"
     return f"{label} {value}"
 
 
@@ -217,7 +219,9 @@ def _reverse_rows(blocks: Sequence[ReverseBlock]) -> list[str]:
             rows.append("")
         rows.append(bold(f"역방향 · {block.symbol}"))
         for line in block.lines:
-            rows.append(f"{line.direction} 1위 {format_rate(line.rate_1st)}" f" / 20위 {format_rate(line.rate_20th)}")
+            rows.append(
+                f"{line.direction} 1위 {format_rate(line.rate_1st)}" f" / {line.rank_cut}위 {format_rate(line.rate_cut)}"
+            )
             rows.append(_extreme_row(line))
     return rows
 

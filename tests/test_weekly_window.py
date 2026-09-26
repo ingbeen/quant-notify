@@ -25,6 +25,7 @@ import pytest
 from notify import cli
 from notify.data.calendar import KR_CALENDAR, US_CALENDAR, trading_days_between
 from notify.data.yfinance_client import closes_through
+from notify.state.reverse_rank import RankEntry, RankThresholds
 
 KODEX = "069500.KS"
 QQQ = "QQQ"
@@ -222,3 +223,44 @@ class TestClosesThrough:
 
         with pytest.raises(ValueError):
             closes_through(closes, date(2026, 9, 8), QQQ)
+
+
+class TestWeeklyLinesTakeTheRankCutFromTheFile:
+    """주간 요약 줄은 순위 컷을 순위 파일에서 가져온다.
+
+    문구 테스트는 손으로 만든 줄을 넘기므로, 줄을 만드는 이 자리에 숫자를 박아 두어도 그쪽은
+    통과한다. 그러면 파일의 컷이 바뀐 날 라벨과 값이 어긋난 채 알림이 정상처럼 나간다.
+    """
+
+    def test_lines_carry_the_entry_of_the_requested_symbol(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """요청한 종목의 컷과 컷 등락률이 두 줄에 실린다. 파일에 없는 컷(7)으로 박힌 숫자와 가른다."""
+        entry = RankEntry(
+            thresholds=RankThresholds(surge_1st=0.2417, surge_cut=0.0768, plunge_1st=-0.1246, plunge_cut=-0.0817),
+            rank_cut=7,
+            data_from=date(2002, 10, 15),
+            data_to=date(2026, 9, 23),
+        )
+        requested: list[str] = []
+
+        def _load(key: str) -> RankEntry:
+            """요청한 열쇠를 적어 두고 준비한 종목을 돌려준다.
+
+            Args:
+                key: 종목 열쇠.
+
+            Returns:
+                준비한 종목.
+            """
+            requested.append(key)
+            return entry
+
+        monkeypatch.setattr(cli, "_load_rank", _load)
+        changes = pd.Series({WEEK_START: 0.0100, date(2026, 9, 1): -0.0099}, dtype="float64")
+
+        lines = cli._weekly_extreme_line(cli.RANK_KEY_KODEX, changes)
+
+        assert requested == [cli.RANK_KEY_KODEX]
+        assert [(line.direction, line.rank_cut, line.rate_cut) for line in lines] == [
+            ("폭등", 7, 0.0768),
+            ("폭락", 7, -0.0817),
+        ]

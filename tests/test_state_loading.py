@@ -21,10 +21,11 @@ VALID_RANK = """
 [kodex200]
 data_from = 2002-10-15
 data_to = 2026-08-26
+rank_cut = 10
 surge_1st = 0.2417
-surge_20th = 0.0610
+surge_cut = 0.0769
 plunge_1st = -0.1246
-plunge_20th = -0.0631
+plunge_cut = -0.0817
 """
 
 VALID_POSITIONS = """
@@ -125,8 +126,46 @@ class TestReverseRankLoading:
         """종목별 순위 등락률을 읽는다."""
         loaded = load_reverse_rank(_write(tmp_path, "reverse_rank.toml", VALID_RANK))
 
-        assert loaded["kodex200"].thresholds.surge_20th == pytest.approx(0.0610)
-        assert loaded["kodex200"].thresholds.plunge_20th == pytest.approx(-0.0631)
+        assert loaded["kodex200"].thresholds.surge_cut == pytest.approx(0.0769)
+        assert loaded["kodex200"].thresholds.plunge_cut == pytest.approx(-0.0817)
+
+    def test_loads_rank_cut(self, tmp_path: Path) -> None:
+        """순위 등락률이 몇 위 값인지 함께 읽는다. 주간 문구의 `N위` 가 이 값에서 나온다."""
+        loaded = load_reverse_rank(_write(tmp_path, "reverse_rank.toml", VALID_RANK))
+
+        assert loaded["kodex200"].rank_cut == 10
+
+    def test_missing_rank_cut_raises(self, tmp_path: Path) -> None:
+        """순위 컷이 없으면 예외다. 값이 몇 위인지 모르면 문구에 적을 수 없다."""
+        body = VALID_RANK.replace("rank_cut = 10\n", "")
+
+        with pytest.raises(ValueError, match="rank_cut"):
+            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
+
+    def test_fractional_rank_cut_raises(self, tmp_path: Path) -> None:
+        """순위 컷이 정수가 아니면 예외다."""
+        body = VALID_RANK.replace("rank_cut = 10", "rank_cut = 10.5")
+
+        with pytest.raises(ValueError, match="rank_cut"):
+            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
+
+    def test_boolean_rank_cut_raises(self, tmp_path: Path) -> None:
+        """순위 컷이 `true` 면 예외다.
+
+        TOML `true` 는 파이썬 `bool` 이고 `bool` 은 `int` 의 하위형이라 정수 검사를 그냥
+        통과한다. 넘어가면 주간 문구에 `True위` 가 찍힌다.
+        """
+        body = VALID_RANK.replace("rank_cut = 10", "rank_cut = true")
+
+        with pytest.raises(ValueError, match="rank_cut"):
+            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
+
+    def test_zero_rank_cut_raises(self, tmp_path: Path) -> None:
+        """순위 컷이 1 보다 작으면 예외다. 0위까지인 순위는 없다."""
+        body = VALID_RANK.replace("rank_cut = 10", "rank_cut = 0")
+
+        with pytest.raises(ValueError, match="rank_cut"):
+            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
 
     def test_missing_file_raises(self, tmp_path: Path) -> None:
         """파일이 없으면 예외다.
@@ -144,7 +183,7 @@ class TestReverseRankLoading:
 
     def test_missing_field_raises(self, tmp_path: Path) -> None:
         """필수 필드가 빠지면 예외다."""
-        body = "[kodex200]\ndata_to = 2026-08-26\nsurge_20th = 0.0610\n"
+        body = "[kodex200]\ndata_to = 2026-08-26\nsurge_cut = 0.0769\n"
 
         with pytest.raises(ValueError):
             load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
@@ -155,30 +194,34 @@ class TestReverseRankLoading:
         값은 비율이다. 6.10 은 610% 라 하루 등락률로 있을 수 없다.
         이 검사가 없으면 임계가 열 배 느슨해져 알림이 영영 울리지 않는다.
         """
-        body = VALID_RANK.replace("surge_20th = 0.0610", "surge_20th = 6.10")
+        body = VALID_RANK.replace("surge_cut = 0.0769", "surge_cut = 7.69")
 
         with pytest.raises(ValueError):
             load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
 
     def test_positive_plunge_raises(self, tmp_path: Path) -> None:
         """폭락 값이 양수면 예외다. 부호가 곧 방향이다."""
-        body = VALID_RANK.replace("plunge_20th = -0.0631", "plunge_20th = 0.0631")
+        body = VALID_RANK.replace("plunge_cut = -0.0817", "plunge_cut = 0.0817")
 
         with pytest.raises(ValueError):
             load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
 
     def test_negative_surge_raises(self, tmp_path: Path) -> None:
         """폭등 값이 음수면 예외다."""
-        body = VALID_RANK.replace("surge_20th = 0.0610", "surge_20th = -0.0610")
+        body = VALID_RANK.replace("surge_cut = 0.0769", "surge_cut = -0.0769")
 
         with pytest.raises(ValueError):
             load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
 
-    def test_first_must_be_more_extreme_than_twentieth(self, tmp_path: Path) -> None:
-        """1위가 20위보다 덜 극단적이면 예외다. 순위가 뒤바뀐 것이다."""
-        body = VALID_RANK.replace("surge_1st = 0.2417", "surge_1st = 0.0500")
+    def test_first_must_be_more_extreme_than_the_cut(self, tmp_path: Path) -> None:
+        """1위가 컷 값보다 덜 극단적이면 예외다. 순위가 뒤바뀐 것이다.
 
-        with pytest.raises(ValueError):
+        메시지는 컷을 `rank_cut` 으로 부른다 — 몇 위와 견줬는지가 드러나야 고칠 값이 보인다.
+        파일에 없는 컷(7)을 줘서 메시지에 숫자를 박아 둔 코드와 가른다.
+        """
+        body = VALID_RANK.replace("surge_1st = 0.2417", "surge_1st = 0.0500").replace("rank_cut = 10", "rank_cut = 7")
+
+        with pytest.raises(ValueError, match="7위"):
             load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
 
     def test_date_with_a_time_raises(self, tmp_path: Path) -> None:
@@ -196,7 +239,7 @@ class TestReverseRankLoading:
     def test_keeps_the_ranking_period(self, tmp_path: Path) -> None:
         """데이터 구간을 함께 읽는다.
 
-        `data_to` 가 기준일을 겸한다 — 알림이 「이 날 뒤에 20위에 든 날이 있는가」로
+        `data_to` 가 기준일을 겸한다 — 알림이 「이 날 뒤에 순위 컷 안에 든 날이 있는가」로
         낡음을 판정하므로, 이 값이 없으면 판정 자체가 불가능하다.
         """
         loaded = load_reverse_rank(_write(tmp_path, "reverse_rank.toml", VALID_RANK))

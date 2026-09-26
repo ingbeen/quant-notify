@@ -8,7 +8,7 @@ GitHub Actions 에서 돌고, **매일 갱신되는 누적 상태를 갖지 않�
 | 알림 | 시각 (KST) | 내용 |
 | --- | --- | --- |
 | `buffer_zone` | 화~토 아침 | SPY · QQQ · GLD · TLT 의 200일 이동평균 근접도 + 보유 종목과 비중 |
-| `reverse_rank_kr` | 월~금 12:00 · 14:30 | KODEX 200 이 역대 상위 20위 등락률에 접근하면 알림. **멀면 침묵** |
+| `reverse_rank_kr` | 월~금 12:00 · 14:30 | KODEX 200 이 역대 상위 순위 컷(`state/reverse_rank.toml` 의 `rank_cut`) 등락률에 접근하면 알림. **멀면 침묵** |
 | `reverse_rank_us` | 화~토 아침 | QQQ 에 대해 같은 판정. **멀면 침묵** |
 | `usdkrw` | 월요일 아침 | 원달러가 1·3·5·10년 평균 대비 어디인지 + 지난주 역방향 요약 |
 

@@ -35,12 +35,12 @@ from notify.common_constants import TZ_KST
 from notify.state.reverse_rank import RankThresholds
 
 # KODEX 200 순위 등락률
-KODEX = RankThresholds(surge_1st=0.2417, surge_20th=0.0610, plunge_1st=-0.1246, plunge_20th=-0.0631)
+KODEX = RankThresholds(surge_1st=0.2417, surge_cut=0.0768, plunge_1st=-0.1246, plunge_cut=-0.0817)
 
 # QQQ 순위 등락률
-QQQ = RankThresholds(surge_1st=0.1684, surge_20th=0.0742, plunge_1st=-0.1198, plunge_20th=-0.0687)
+QQQ = RankThresholds(surge_1st=0.1684, surge_cut=0.0957, plunge_1st=-0.1198, plunge_cut=-0.0781)
 
-# 순위 값이 매겨진 마지막 날. `state/reverse_rank.toml` 의 kodex200 실측값이다
+# 순위 값이 매겨진 마지막 날. 정본 예시(docs/DESIGN.md 4.5 절)가 쓰는 날짜다
 DATA_TO = date(2026, 8, 26)
 
 
@@ -91,7 +91,7 @@ class TestReverseRankKorea:
             "KODEX 200",
             KODEX,
             prev_close=112285.0,
-            current_price=106200.0,
+            current_price=103950.0,
             sent_at=datetime(2026, 9, 4, 12, 0, tzinfo=TZ_KST),
         )
 
@@ -99,8 +99,8 @@ class TestReverseRankKorea:
             f"{RED_DOT} <b>역방향 · KODEX 200 · 폭락 근접</b>\n"
             "09-04 (금) 12:00\n"
             "\n"
-            "현재 106,200원 -5.42%\n"
-            "신호 105,200원 -6.31%"
+            "현재 103,950원 -7.42%\n"
+            "신호 103,111원 -8.17%"
         )
 
     def test_uses_reached_for_intraday(self) -> None:
@@ -123,12 +123,12 @@ class TestReverseRankKorea:
             "KODEX 200",
             KODEX,
             prev_close=112285.0,
-            current_price=118100.0,
+            current_price=120300.0,
             sent_at=datetime(2026, 9, 4, 12, 0, tzinfo=TZ_KST),
         )
 
         assert "폭등 근접" in text
-        assert "+6.10%" in text
+        assert "+7.68%" in text
 
 
 class TestReverseRankUnitedStates:
@@ -141,12 +141,12 @@ class TestReverseRankUnitedStates:
             "QQQ",
             QQQ,
             prev_close=574.70,
-            current_price=619.50,
+            current_price=632.00,
             sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
         )
 
         assert text == (
-            f"{RED_DOT} <b>역방향 · QQQ · 폭등 발생</b>\n" "09-04 (금) 07:30\n" "\n" "종가 $619.50 +7.80%\n" "신호 $617.34 +7.42%"
+            f"{RED_DOT} <b>역방향 · QQQ · 폭등 발생</b>\n" "09-04 (금) 07:30\n" "\n" "종가 $632.00 +9.97%\n" "신호 $629.70 +9.57%"
         )
 
     def test_uses_occurred_not_reached(self) -> None:
@@ -156,7 +156,7 @@ class TestReverseRankUnitedStates:
             "QQQ",
             QQQ,
             prev_close=574.70,
-            current_price=619.50,
+            current_price=632.00,
             sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
         )
 
@@ -167,7 +167,7 @@ class TestReverseRankUnitedStates:
 class TestRankStalenessNotice:
     """순위 갱신 필요 문구.
 
-    20위 안에 새로 드는 것이 곧 신호의 정의이므로(정본 1.5 절), 신호가 났으면 순위를
+    순위 컷 안에 새로 드는 것이 곧 신호의 정의이므로(정본 1.5 절), 신호가 났으면 순위를
     다시 매겨야 한다. 그 연결을 사용자가 기억하지 않게 알림이 직접 적는다.
     """
 
@@ -176,7 +176,7 @@ class TestRankStalenessNotice:
         text = render_staleness(
             symbol="KODEX 200",
             data_to=DATA_TO,
-            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.068)],
+            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.0795)],
             sent_at=datetime(2026, 9, 11, 12, 0, tzinfo=TZ_KST),
         )
 
@@ -185,7 +185,7 @@ class TestRankStalenessNotice:
             "09-11 (금) 12:00\n"
             "\n"
             "순위값 08-26 (수) 기준\n"
-            "09-03 (목) 폭등 +6.80%"
+            "09-03 (목) 폭등 +7.95%"
         )
 
     def test_confirmed_signal_carries_the_block(self) -> None:
@@ -195,22 +195,22 @@ class TestRankStalenessNotice:
             "QQQ",
             QQQ,
             prev_close=574.70,
-            current_price=619.50,
+            current_price=632.00,
             sent_at=datetime(2026, 9, 11, 7, 20, tzinfo=TZ_KST),
             data_to=date(2026, 8, 25),
-            unreflected=[UnreflectedDay(on=date(2026, 9, 11), direction=Direction.SURGE, change_rate=0.0780)],
+            unreflected=[UnreflectedDay(on=date(2026, 9, 11), direction=Direction.SURGE, change_rate=0.0997)],
         )
 
         assert text == (
             f"{RED_DOT} <b>역방향 · QQQ · 폭등 발생</b>\n"
             "09-11 (금) 07:20\n"
             "\n"
-            "종가 $619.50 +7.80%\n"
-            "신호 $617.34 +7.42%\n"
+            "종가 $632.00 +9.97%\n"
+            "신호 $629.70 +9.57%\n"
             "\n"
             "<b>순위 갱신 필요</b>\n"
             "순위값 08-25 (화) 기준\n"
-            "09-11 (금) 폭등 +7.80%"
+            "09-11 (금) 폭등 +9.97%"
         )
 
     def test_intraday_hit_says_the_close_is_not_settled_yet(self) -> None:
@@ -224,7 +224,7 @@ class TestRankStalenessNotice:
             "KODEX 200",
             KODEX,
             prev_close=112285.0,
-            current_price=120000.0,
+            current_price=121500.0,
             sent_at=datetime(2026, 9, 11, 14, 30, tzinfo=TZ_KST),
         )
 
@@ -232,12 +232,12 @@ class TestRankStalenessNotice:
             f"{RED_DOT} <b>역방향 · KODEX 200 · 폭등 도달</b>\n"
             "09-11 (금) 14:30\n"
             "\n"
-            "현재 120,000원 +6.87%\n"
-            "신호 119,134원 +6.10%\n"
+            "현재 121,500원 +8.21%\n"
+            "신호 120,908원 +7.68%\n"
             "\n"
             "<b>순위 갱신 필요</b>\n"
             "순위값 08-26 (수) 기준\n"
-            "09-11 (금) 폭등 +6.87% (미확정)"
+            "09-11 (금) 폭등 +8.21% (미확정)"
         )
 
     def test_pending_today_is_shaped_like_the_confirmed_rows(self) -> None:
@@ -251,21 +251,21 @@ class TestRankStalenessNotice:
             "KODEX 200",
             KODEX,
             prev_close=112285.0,
-            current_price=120000.0,
+            current_price=121500.0,
             sent_at=datetime(2026, 9, 11, 14, 30, tzinfo=TZ_KST),
-            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.068)],
+            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.0795)],
         )
 
-        assert text.endswith("09-03 (목) 폭등 +6.80%\n" "09-11 (금) 폭등 +6.87% (미확정)")
+        assert text.endswith("09-03 (목) 폭등 +7.95%\n" "09-11 (금) 폭등 +8.21% (미확정)")
 
     def test_near_without_unreflected_days_carries_nothing(self) -> None:
-        """근접은 20위에 못 닿은 것이라 그날로는 순위가 바뀌지 않는다."""
+        """근접은 컷에 못 닿은 것이라 그날로는 순위가 바뀌지 않는다."""
         text = _render(
             Market.KR,
             "KODEX 200",
             KODEX,
             prev_close=112285.0,
-            current_price=118100.0,
+            current_price=120300.0,
             sent_at=datetime(2026, 9, 11, 12, 0, tzinfo=TZ_KST),
         )
 
@@ -282,14 +282,14 @@ class TestRankStalenessNotice:
             "KODEX 200",
             KODEX,
             prev_close=112285.0,
-            current_price=118100.0,
+            current_price=120300.0,
             sent_at=datetime(2026, 9, 11, 12, 0, tzinfo=TZ_KST),
-            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.068)],
+            unreflected=[UnreflectedDay(on=date(2026, 9, 3), direction=Direction.SURGE, change_rate=0.0795)],
         )
 
         assert "폭등 근접" in text
         assert "순위 갱신 필요" in text
-        assert "09-03 (목) 폭등 +6.80%" in text
+        assert "09-03 (목) 폭등 +7.95%" in text
         assert "미확정" not in text
 
     def test_block_lists_every_unreflected_day(self) -> None:
@@ -299,17 +299,17 @@ class TestRankStalenessNotice:
             "QQQ",
             QQQ,
             prev_close=574.70,
-            current_price=619.50,
+            current_price=632.00,
             sent_at=datetime(2026, 9, 11, 7, 20, tzinfo=TZ_KST),
             data_to=date(2026, 8, 25),
             unreflected=[
-                UnreflectedDay(on=date(2026, 9, 2), direction=Direction.PLUNGE, change_rate=-0.0712),
-                UnreflectedDay(on=date(2026, 9, 11), direction=Direction.SURGE, change_rate=0.0780),
+                UnreflectedDay(on=date(2026, 9, 2), direction=Direction.PLUNGE, change_rate=-0.0812),
+                UnreflectedDay(on=date(2026, 9, 11), direction=Direction.SURGE, change_rate=0.0997),
             ],
         )
 
-        assert "09-02 (수) 폭락 -7.12%" in text
-        assert "09-11 (금) 폭등 +7.80%" in text
+        assert "09-02 (수) 폭락 -8.12%" in text
+        assert "09-11 (금) 폭등 +9.97%" in text
 
 
 class TestSilence:
@@ -492,11 +492,12 @@ class TestUsdKrw:
     """원달러 주간 알림 문구."""
 
     @staticmethod
-    def _render(kodex_plunge_rate: float = -0.0350) -> str:
+    def _render(kodex_plunge_rate: float = -0.0350, rank_cut: int = 10) -> str:
         """정본 예시와 같은 조건으로 문구를 만든다.
 
         Args:
             kodex_plunge_rate: KODEX 200 의 지난주 최저 등락률. 신호 여부를 가른다.
+            rank_cut: 순위 컷. 문구의 `N위` 가 된다.
 
         Returns:
             보낼 문구.
@@ -515,15 +516,15 @@ class TestUsdKrw:
                 ReverseBlock(
                     "KODEX 200",
                     [
-                        ReverseLine("폭등", 0.2417, 0.0610, 0.0210, date(2026, 9, 4)),
-                        ReverseLine("폭락", -0.1246, -0.0631, kodex_plunge_rate, date(2026, 9, 1)),
+                        ReverseLine("폭등", 0.2417, rank_cut, 0.0768, 0.0210, date(2026, 9, 4)),
+                        ReverseLine("폭락", -0.1246, rank_cut, -0.0817, kodex_plunge_rate, date(2026, 9, 1)),
                     ],
                 ),
                 ReverseBlock(
                     "QQQ",
                     [
-                        ReverseLine("폭등", 0.1684, 0.0742, 0.0325, date(2026, 9, 2)),
-                        ReverseLine("폭락", -0.1198, -0.0687, -0.0088, date(2026, 9, 1)),
+                        ReverseLine("폭등", 0.1684, rank_cut, 0.0957, 0.0325, date(2026, 9, 2)),
+                        ReverseLine("폭락", -0.1198, rank_cut, -0.0781, -0.0088, date(2026, 9, 1)),
                     ],
                 ),
             ],
@@ -544,15 +545,15 @@ class TestUsdKrw:
             "10년 평균 1,247원 대비 +11.1%\n"
             "\n"
             "<b>역방향 · KODEX 200</b>\n"
-            "폭등 1위 +24.17% / 20위 +6.10%\n"
+            "폭등 1위 +24.17% / 10위 +7.68%\n"
             "지난주 최고 +2.10% (09-04 금)\n"
-            "폭락 1위 -12.46% / 20위 -6.31%\n"
+            "폭락 1위 -12.46% / 10위 -8.17%\n"
             "지난주 최저 -3.50% (09-01 화)\n"
             "\n"
             "<b>역방향 · QQQ</b>\n"
-            "폭등 1위 +16.84% / 20위 +7.42%\n"
+            "폭등 1위 +16.84% / 10위 +9.57%\n"
             "지난주 최고 +3.25% (09-02 수)\n"
-            "폭락 1위 -11.98% / 20위 -6.87%\n"
+            "폭락 1위 -11.98% / 10위 -7.81%\n"
             "지난주 최저 -0.88% (09-01 화)\n"
             "\n"
             "<b>점검</b>\n"
@@ -565,17 +566,28 @@ class TestUsdKrw:
         assert RED_DOT not in self._render()
 
     def test_signal_week_marks_only_that_row(self) -> None:
-        """지난주 값이 20위 등락률에 닿으면 그 줄만 신호로 바뀌고 강조된다."""
-        text = self._render(kodex_plunge_rate=-0.0648)
+        """지난주 값이 순위 컷 등락률에 닿으면 그 줄만 신호로 바뀌고 강조된다."""
+        text = self._render(kodex_plunge_rate=-0.0848)
 
-        assert f"{RED_DOT} <b>지난주 신호 -6.48% (09-01 화)</b>" in text
+        assert f"{RED_DOT} <b>지난주 신호 -8.48% (09-01 화)</b>" in text
         assert "지난주 최고 +2.10% (09-04 금)" in text
         assert "지난주 최저" not in text.split("<b>역방향 · QQQ</b>")[0]
         assert text.count(RED_DOT) == 1
 
     def test_boundary_counts_as_a_signal(self) -> None:
-        """20위 등락률과 같으면 신호다. 규격이 「이 값 이상」이다."""
-        assert f"{RED_DOT} <b>지난주 신호 -6.31%" in self._render(kodex_plunge_rate=-0.0631)
+        """순위 컷 등락률과 같으면 신호다. 규격이 「이 값 이상」이다."""
+        assert f"{RED_DOT} <b>지난주 신호 -8.17%" in self._render(kodex_plunge_rate=-0.0817)
+
+    def test_rank_label_follows_the_rank_cut(self) -> None:
+        """`N위` 의 숫자는 순위 컷 값에서 온다. 문구에 박혀 있지 않다.
+
+        순위 컷은 verify-lab 이 정하고 바뀐 적이 있다. 숫자를 문구에 박으면 컷이 바뀐 날
+        값과 라벨이 어긋난 채로 알림이 정상처럼 나간다.
+        """
+        text = self._render(rank_cut=20)
+
+        assert "폭등 1위 +24.17% / 20위 +7.68%" in text
+        assert "/ 10위" not in text
 
     def test_carries_no_verdict_words(self) -> None:
         """판정 어휘를 붙이지 않는다. 예측력이 없는 지표가 행동 지시가 되면 안 된다."""

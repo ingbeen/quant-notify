@@ -48,8 +48,8 @@ class TestSignalPrices:
         """신호 가격은 전일 종가에 순위 등락률을 곱해 나온다."""
         prices = signal_prices(kodex_prev_close, RankThresholds(**kodex_thresholds))
 
-        assert prices.surge == pytest.approx(kodex_prev_close * (1 + kodex_thresholds["surge_20th"]))
-        assert prices.plunge == pytest.approx(kodex_prev_close * (1 + kodex_thresholds["plunge_20th"]))
+        assert prices.surge == pytest.approx(kodex_prev_close * (1 + kodex_thresholds["surge_cut"]))
+        assert prices.plunge == pytest.approx(kodex_prev_close * (1 + kodex_thresholds["plunge_cut"]))
 
     def test_surge_is_above_and_plunge_is_below_prev_close(
         self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
@@ -78,7 +78,7 @@ class TestComparisonDirection:
         self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
     ) -> None:
         """폭등은 신호 가격 이상일 때 도달이다."""
-        result = _judge(kodex_prev_close, kodex_thresholds["surge_20th"] + 0.005, kodex_thresholds)
+        result = _judge(kodex_prev_close, kodex_thresholds["surge_cut"] + 0.005, kodex_thresholds)
 
         assert result.state is SignalState.HIT
         assert result.direction is Direction.SURGE
@@ -87,7 +87,7 @@ class TestComparisonDirection:
         self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
     ) -> None:
         """폭락은 신호 가격 이하일 때 도달이다."""
-        result = _judge(kodex_prev_close, kodex_thresholds["plunge_20th"] - 0.005, kodex_thresholds)
+        result = _judge(kodex_prev_close, kodex_thresholds["plunge_cut"] - 0.005, kodex_thresholds)
 
         assert result.state is SignalState.HIT
         assert result.direction is Direction.PLUNGE
@@ -99,7 +99,7 @@ class TestComparisonDirection:
 
         부등호가 뒤집히면 이 지점이 도달로 잡힌다.
         """
-        result = _judge(kodex_prev_close, kodex_thresholds["surge_20th"] - 0.005, kodex_thresholds)
+        result = _judge(kodex_prev_close, kodex_thresholds["surge_cut"] - 0.005, kodex_thresholds)
 
         assert result.state is not SignalState.HIT
 
@@ -107,7 +107,7 @@ class TestComparisonDirection:
         self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
     ) -> None:
         """폭락 신호 가격보다 위면 도달이 아니다."""
-        result = _judge(kodex_prev_close, kodex_thresholds["plunge_20th"] + 0.005, kodex_thresholds)
+        result = _judge(kodex_prev_close, kodex_thresholds["plunge_cut"] + 0.005, kodex_thresholds)
 
         assert result.state is not SignalState.HIT
 
@@ -133,11 +133,11 @@ class TestIndependentRanking:
     ) -> None:
         """폭락 임계의 절대값에 못 미쳐도 폭등 임계를 넘으면 도달이다.
 
-        KODEX 200 은 폭등 6.10% · 폭락 -6.31% 라 두 값의 크기가 다르다.
+        KODEX 200 은 폭등 7.69% · 폭락 -8.17% 라 두 값의 크기가 다르다.
         절대값 하나로 합치면 이 구간이 통째로 묻힌다.
         """
-        change_rate = kodex_thresholds["surge_20th"] + 0.001
-        assert change_rate < abs(kodex_thresholds["plunge_20th"])
+        change_rate = kodex_thresholds["surge_cut"] + 0.001
+        assert change_rate < abs(kodex_thresholds["plunge_cut"])
 
         result = _judge(kodex_prev_close, change_rate, kodex_thresholds)
 
@@ -148,8 +148,8 @@ class TestIndependentRanking:
         self, kodex_prev_close: float, kodex_thresholds: dict[str, float]
     ) -> None:
         """폭등 임계만큼 내려도 폭락 임계에 못 미치면 도달이 아니다."""
-        change_rate = -(kodex_thresholds["surge_20th"] + 0.001)
-        assert abs(change_rate) < abs(kodex_thresholds["plunge_20th"])
+        change_rate = -(kodex_thresholds["surge_cut"] + 0.001)
+        assert abs(change_rate) < abs(kodex_thresholds["plunge_cut"])
 
         result = _judge(kodex_prev_close, change_rate, kodex_thresholds)
 
@@ -175,7 +175,7 @@ class TestMarginAndSilence:
         """도달하지 않았어도 여유 안에 들어오면 근접이다."""
         result = _judge(
             kodex_prev_close,
-            kodex_thresholds["surge_20th"] - REVERSE_MARGIN_RATE / 2,
+            kodex_thresholds["surge_cut"] - REVERSE_MARGIN_RATE / 2,
             kodex_thresholds,
         )
 
@@ -197,7 +197,7 @@ class TestMarginAndSilence:
         """여유 밖이면 침묵이다. 방향도 남기지 않는다."""
         result = _judge(
             kodex_prev_close,
-            kodex_thresholds["surge_20th"] - REVERSE_MARGIN_RATE * 2,
+            kodex_thresholds["surge_cut"] - REVERSE_MARGIN_RATE * 2,
             kodex_thresholds,
         )
 
@@ -214,7 +214,7 @@ class TestMarginAndSilence:
         """폭락 쪽 여유는 임계보다 위쪽으로 잡힌다 — 부호를 따라 방향이 뒤집힌다."""
         result = _judge(
             kodex_prev_close,
-            kodex_thresholds["plunge_20th"] + REVERSE_MARGIN_RATE / 2,
+            kodex_thresholds["plunge_cut"] + REVERSE_MARGIN_RATE / 2,
             kodex_thresholds,
         )
 
@@ -240,7 +240,7 @@ class TestSharedAcrossMarkets:
     def test_qqq_uses_the_same_rule(self, qqq_thresholds: dict[str, float]) -> None:
         """QQQ 도 같은 산식으로 판정한다. 다른 것은 순위 값뿐이다."""
         prev_close = 603.42
-        result = _judge(prev_close, qqq_thresholds["surge_20th"] + 0.001, qqq_thresholds)
+        result = _judge(prev_close, qqq_thresholds["surge_cut"] + 0.001, qqq_thresholds)
 
         assert result.state is SignalState.HIT
         assert result.direction is Direction.SURGE

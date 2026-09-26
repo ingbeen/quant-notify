@@ -15,8 +15,9 @@ from typing import Any
 from notify.common_constants import MAX_DAILY_CHANGE_RATE, TZ_KST
 
 # 종목마다 있어야 하는 항목
-_RATE_FIELDS = ("surge_1st", "surge_20th", "plunge_1st", "plunge_20th")
+_RATE_FIELDS = ("surge_1st", "surge_cut", "plunge_1st", "plunge_cut")
 _DATE_FIELDS = ("data_from", "data_to")
+_RANK_CUT_FIELD = "rank_cut"
 
 
 @dataclass(frozen=True)
@@ -24,18 +25,22 @@ class RankThresholds:
     """한 종목의 순위 등락률.
 
     값은 비율이다 (0.0610 = +6.10%). 폭등과 폭락은 순위를 따로 매기므로
-    두 값의 크기가 서로 다르다.
+    두 값의 크기가 서로 다르다. `*_cut` 은 순위 컷 위치의 등락률이다.
     """
 
     surge_1st: float
-    surge_20th: float
+    surge_cut: float
     plunge_1st: float
-    plunge_20th: float
+    plunge_cut: float
 
 
 @dataclass(frozen=True)
 class RankEntry:
-    """순위 등락률과 그 값이 어느 구간으로 매겨졌는지.
+    """순위 등락률과 그 값이 몇 위 값이고 어느 구간으로 매겨졌는지.
+
+    **순위 컷(`rank_cut`)을 이름이 아니라 값으로 둔다.** 판정은 컷 등락률만 쓰고 몇 위인지
+    모른다 — 몇 위인지는 문구와 오류 메시지에만 쓰인다. 컷은 verify-lab 이 정하고 바뀐 적이
+    있어, 필드 이름에 박으면 바뀔 때마다 파일·코드·테스트의 이름을 모두 고쳐야 한다.
 
     **`data_to` 가 기준일을 겸한다.** 판정이 묻는 것은 「이 날의 등락률이 줄 세우기에
     들어갔나」이고, 그 답은 계산에 넣은 마지막 날 하나로 난다. 「값을 계산한 날」을
@@ -44,6 +49,7 @@ class RankEntry:
     """
 
     thresholds: RankThresholds
+    rank_cut: int
     data_from: date
     data_to: date
 
@@ -102,6 +108,35 @@ def _require_date(raw: dict[str, Any], field: str, symbol: str) -> date:
     return value
 
 
+def _require_rank_cut(raw: dict[str, Any], symbol: str) -> int:
+    """순위 컷을 꺼내 검증한다.
+
+    **`bool` 을 먼저 막는다.** TOML `true` 는 파이썬 `bool` 이고 `bool` 은 `int` 의
+    하위형이라 정수 검사를 그냥 통과한다 — 넘어가면 문구에 `True위` 가 찍힌다.
+
+    Args:
+        raw: 종목 하나의 원본 매핑.
+        symbol: 종목 식별자. 오류 메시지에 쓴다.
+
+    Returns:
+        순위 컷. 이 순위 이내면 신호다.
+
+    Raises:
+        ValueError: 항목이 없거나, 정수가 아니거나, 1 보다 작을 때.
+    """
+    if _RANK_CUT_FIELD not in raw:
+        raise ValueError(
+            f"[{symbol}] '{_RANK_CUT_FIELD}' 항목이 없습니다. " f"순위 등락률이 몇 위 값인지 적으세요 (예: {_RANK_CUT_FIELD} = 10)."
+        )
+
+    value = raw[_RANK_CUT_FIELD]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"[{symbol}] '{_RANK_CUT_FIELD}' 는 정수여야 합니다. 지금 값: {value!r}")
+    if value < 1:
+        raise ValueError(f"[{symbol}] '{_RANK_CUT_FIELD}' 는 1 이상이어야 합니다. 지금 값: {value}")
+    return value
+
+
 def _check_period(data_from: date, data_to: date, symbol: str) -> None:
     """데이터 구간이 말이 되는지 본다.
 
@@ -133,35 +168,36 @@ def _check_period(data_from: date, data_to: date, symbol: str) -> None:
         )
 
 
-def _build_thresholds(raw: dict[str, Any], symbol: str) -> RankThresholds:
+def _build_thresholds(raw: dict[str, Any], symbol: str, rank_cut: int) -> RankThresholds:
     """종목 하나의 순위 등락률을 만든다.
 
     Args:
         raw: 종목 하나의 원본 매핑.
         symbol: 종목 식별자.
+        rank_cut: 순위 컷. 오류 메시지에 쓴다.
 
     Returns:
         검증을 통과한 순위 등락률.
 
     Raises:
-        ValueError: 부호가 방향과 어긋나거나 1위가 20위보다 덜 극단적일 때.
+        ValueError: 부호가 방향과 어긋나거나 1위가 컷 값보다 덜 극단적일 때.
     """
     rates = {field: _require_rate(raw, field, symbol) for field in _RATE_FIELDS}
 
-    for field in ("surge_1st", "surge_20th"):
+    for field in ("surge_1st", "surge_cut"):
         if rates[field] <= 0:
             raise ValueError(f"[{symbol}] '{field}' 는 양수여야 합니다. 폭등 값에 음수가 들어왔습니다: {rates[field]}")
-    for field in ("plunge_1st", "plunge_20th"):
+    for field in ("plunge_1st", "plunge_cut"):
         if rates[field] >= 0:
             raise ValueError(f"[{symbol}] '{field}' 는 음수여야 합니다. 폭락 값에 양수가 들어왔습니다: {rates[field]}")
 
-    if rates["surge_1st"] < rates["surge_20th"]:
+    if rates["surge_1st"] < rates["surge_cut"]:
         raise ValueError(
-            f"[{symbol}] 폭등 1위({rates['surge_1st']})가 20위({rates['surge_20th']})보다 작습니다. " f"순위가 뒤바뀌었는지 확인하세요."
+            f"[{symbol}] 폭등 1위({rates['surge_1st']})가 {rank_cut}위({rates['surge_cut']})보다 작습니다. " f"순위가 뒤바뀌었는지 확인하세요."
         )
-    if rates["plunge_1st"] > rates["plunge_20th"]:
+    if rates["plunge_1st"] > rates["plunge_cut"]:
         raise ValueError(
-            f"[{symbol}] 폭락 1위({rates['plunge_1st']})가 20위({rates['plunge_20th']})보다 큽니다. " f"순위가 뒤바뀌었는지 확인하세요."
+            f"[{symbol}] 폭락 1위({rates['plunge_1st']})가 {rank_cut}위({rates['plunge_cut']})보다 큽니다. " f"순위가 뒤바뀌었는지 확인하세요."
         )
 
     return RankThresholds(**rates)
@@ -200,6 +236,7 @@ def load_reverse_rank(path: Path) -> dict[str, RankEntry]:
             raise ValueError(f"[{symbol}] 은 종목 블록이어야 합니다 (예: [kodex200]).")
         dates = {field: _require_date(raw, field, symbol) for field in _DATE_FIELDS}
         _check_period(dates["data_from"], dates["data_to"], symbol)
-        entries[symbol] = RankEntry(thresholds=_build_thresholds(raw, symbol), **dates)
+        rank_cut = _require_rank_cut(raw, symbol)
+        entries[symbol] = RankEntry(thresholds=_build_thresholds(raw, symbol, rank_cut), rank_cut=rank_cut, **dates)
 
     return entries
