@@ -2,31 +2,15 @@
 
 `state/` 는 사람이 손으로 고치는 파일이라 오기입력이 들어온다. 잘못된 값이 그대로
 계산에 들어가면 알림이 조용히 틀리므로, 로딩 시점에 막는다.
-
-파일이 없을 때의 동작은 두 파일이 다르다 — `docs/DESIGN.md` 5.2 절을 따른다.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from notify.common_constants import TZ_KST
 from notify.state.positions import load_positions
-from notify.state.reverse_rank import load_reverse_rank
-
-VALID_RANK = """
-[kodex200]
-data_from = 2002-10-15
-data_to = 2026-08-26
-rank_cut = 10
-surge_1st = 0.2417
-surge_cut = 0.0769
-plunge_1st = -0.1246
-plunge_cut = -0.0817
-"""
 
 VALID_POSITIONS = """
 [[positions]]
@@ -117,165 +101,3 @@ class TestPositionsLoading:
 
         with pytest.raises(ValueError):
             load_positions(_write(tmp_path, "positions.toml", body))
-
-
-class TestReverseRankLoading:
-    """순위 등락률 파일."""
-
-    def test_loads_thresholds(self, tmp_path: Path) -> None:
-        """종목별 순위 등락률을 읽는다."""
-        loaded = load_reverse_rank(_write(tmp_path, "reverse_rank.toml", VALID_RANK))
-
-        assert loaded["kodex200"].thresholds.surge_cut == pytest.approx(0.0769)
-        assert loaded["kodex200"].thresholds.plunge_cut == pytest.approx(-0.0817)
-
-    def test_loads_rank_cut(self, tmp_path: Path) -> None:
-        """순위 등락률이 몇 위 값인지 함께 읽는다. 주간 문구의 `N위` 가 이 값에서 나온다."""
-        loaded = load_reverse_rank(_write(tmp_path, "reverse_rank.toml", VALID_RANK))
-
-        assert loaded["kodex200"].rank_cut == 10
-
-    def test_missing_rank_cut_raises(self, tmp_path: Path) -> None:
-        """순위 컷이 없으면 예외다. 값이 몇 위인지 모르면 문구에 적을 수 없다."""
-        body = VALID_RANK.replace("rank_cut = 10\n", "")
-
-        with pytest.raises(ValueError, match="rank_cut"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_fractional_rank_cut_raises(self, tmp_path: Path) -> None:
-        """순위 컷이 정수가 아니면 예외다."""
-        body = VALID_RANK.replace("rank_cut = 10", "rank_cut = 10.5")
-
-        with pytest.raises(ValueError, match="rank_cut"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_boolean_rank_cut_raises(self, tmp_path: Path) -> None:
-        """순위 컷이 `true` 면 예외다.
-
-        TOML `true` 는 파이썬 `bool` 이고 `bool` 은 `int` 의 하위형이라 정수 검사를 그냥
-        통과한다. 넘어가면 주간 문구에 `True위` 가 찍힌다.
-        """
-        body = VALID_RANK.replace("rank_cut = 10", "rank_cut = true")
-
-        with pytest.raises(ValueError, match="rank_cut"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_zero_rank_cut_raises(self, tmp_path: Path) -> None:
-        """순위 컷이 1 보다 작으면 예외다. 0위까지인 순위는 없다."""
-        body = VALID_RANK.replace("rank_cut = 10", "rank_cut = 0")
-
-        with pytest.raises(ValueError, match="rank_cut"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_missing_file_raises(self, tmp_path: Path) -> None:
-        """파일이 없으면 예외다.
-
-        신호 가격을 만들 재료가 없어 판정 자체가 불가능하다. 조용히 넘어가면
-        신호가 없어서 조용한 것과 구분되지 않는다.
-        """
-        with pytest.raises(ValueError):
-            load_reverse_rank(tmp_path / "reverse_rank.toml")
-
-    def test_empty_file_raises(self, tmp_path: Path) -> None:
-        """종목이 하나도 없으면 예외다."""
-        with pytest.raises(ValueError):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", ""))
-
-    def test_missing_field_raises(self, tmp_path: Path) -> None:
-        """필수 필드가 빠지면 예외다."""
-        body = "[kodex200]\ndata_to = 2026-08-26\nsurge_cut = 0.0769\n"
-
-        with pytest.raises(ValueError):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_percent_written_as_ratio_raises(self, tmp_path: Path) -> None:
-        """등락률을 퍼센트로 적으면 예외다.
-
-        값은 비율이다. 6.10 은 610% 라 하루 등락률로 있을 수 없다.
-        이 검사가 없으면 임계가 열 배 느슨해져 알림이 영영 울리지 않는다.
-        """
-        body = VALID_RANK.replace("surge_cut = 0.0769", "surge_cut = 7.69")
-
-        with pytest.raises(ValueError):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_positive_plunge_raises(self, tmp_path: Path) -> None:
-        """폭락 값이 양수면 예외다. 부호가 곧 방향이다."""
-        body = VALID_RANK.replace("plunge_cut = -0.0817", "plunge_cut = 0.0817")
-
-        with pytest.raises(ValueError):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_negative_surge_raises(self, tmp_path: Path) -> None:
-        """폭등 값이 음수면 예외다."""
-        body = VALID_RANK.replace("surge_cut = 0.0769", "surge_cut = -0.0769")
-
-        with pytest.raises(ValueError):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_first_must_be_more_extreme_than_the_cut(self, tmp_path: Path) -> None:
-        """1위가 컷 값보다 덜 극단적이면 예외다. 순위가 뒤바뀐 것이다.
-
-        메시지는 컷을 `rank_cut` 으로 부른다 — 몇 위와 견줬는지가 드러나야 고칠 값이 보인다.
-        파일에 없는 컷(7)을 줘서 메시지에 숫자를 박아 둔 코드와 가른다.
-        """
-        body = VALID_RANK.replace("surge_1st = 0.2417", "surge_1st = 0.0500").replace("rank_cut = 10", "rank_cut = 7")
-
-        with pytest.raises(ValueError, match="7위"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_date_with_a_time_raises(self, tmp_path: Path) -> None:
-        """날짜에 시각이 붙으면 예외다.
-
-        TOML 은 `2026-08-26T00:00:00` 도 유효한 값으로 읽고, `datetime` 은 `date` 의
-        하위형이라 형 검사를 그냥 통과한다. 넘어가면 낡음 판정이 `date` 와 견주다
-        **필드 이름이 없는 TypeError** 로 멈춘다 — 로딩 시점에 막아야 고칠 곳이 드러난다.
-        """
-        body = VALID_RANK.replace("data_to = 2026-08-26", "data_to = 2026-08-26T00:00:00")
-
-        with pytest.raises(ValueError, match="data_to"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_keeps_the_ranking_period(self, tmp_path: Path) -> None:
-        """데이터 구간을 함께 읽는다.
-
-        `data_to` 가 기준일을 겸한다 — 알림이 「이 날 뒤에 순위 컷 안에 든 날이 있는가」로
-        낡음을 판정하므로, 이 값이 없으면 판정 자체가 불가능하다.
-        """
-        loaded = load_reverse_rank(_write(tmp_path, "reverse_rank.toml", VALID_RANK))
-
-        assert loaded["kodex200"].data_from.isoformat() == "2002-10-15"
-        assert loaded["kodex200"].data_to.isoformat() == "2026-08-26"
-
-    def test_future_data_to_raises(self, tmp_path: Path) -> None:
-        """`data_to` 가 미래면 예외다.
-
-        **여기서 막지 않으면 낡음 검사가 통째로 꺼진다.** 검사할 날이 하나도 남지
-        않는데 알림은 정상으로 보인다.
-
-        **알림마다 따로 재지 않고 파일을 읽는 자리에서 한 번 잰다** — 주간 알림은
-        이 파일을 읽지만 낡음 판정을 하지 않아, 판정 쪽에만 두면 그 경로가 빠진다.
-        """
-        future = (datetime.now(TZ_KST).date() + timedelta(days=1)).isoformat()
-        body = VALID_RANK.replace("data_to = 2026-08-26", f"data_to = {future}")
-
-        with pytest.raises(ValueError, match="data_to"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))
-
-    def test_today_data_to_is_accepted(self, tmp_path: Path) -> None:
-        """오늘 날짜는 정상이다.
-
-        마감 뒤 재계산해 그날로 올리는 것이 규칙이 말하는 갱신 방식이다
-        (`reference/역방향_매매_규칙.md` 1.5 절 — 신호가 나면 그날 재계산).
-        """
-        today = datetime.now(TZ_KST).date().isoformat()
-        body = VALID_RANK.replace("data_to = 2026-08-26", f"data_to = {today}")
-
-        assert load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))["kodex200"].data_to.isoformat() == today
-
-    def test_reversed_period_raises(self, tmp_path: Path) -> None:
-        """시작이 끝보다 뒤면 예외다. 두 날짜의 순서는 아무 데서도 검사되지 않았다."""
-        body = VALID_RANK.replace("data_from = 2002-10-15", "data_from = 2026-08-27")
-
-        with pytest.raises(ValueError, match="data_from"):
-            load_reverse_rank(_write(tmp_path, "reverse_rank.toml", body))

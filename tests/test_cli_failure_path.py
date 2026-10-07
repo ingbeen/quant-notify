@@ -110,7 +110,7 @@ class TestSilenceIsNotFailure:
         monkeypatch.setattr(cli.telegram, "send", _never)
         monkeypatch.setattr(cli.telegram, "send_without_raising", _never)
 
-        assert cli.main(["reverse_rank_us"]) == 0
+        assert cli.main(["buffer_zone"]) == 0
 
 
 class TestSendFailureIsNotRetried:

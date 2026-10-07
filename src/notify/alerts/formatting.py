@@ -17,7 +17,7 @@ from datetime import date
 # 한글 요일. date.weekday() 순서에 맞춘다
 _WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
 
-# 눈에 띄어야 하는 것에만 붙인다 — 역방향 신호 · 실패 · 점검 이상.
+# 눈에 띄어야 하는 것에만 붙인다 — 실패 · 점검 이상.
 # 소스를 ASCII 로 유지하려고 이스케이프로 적는다 (루트 CLAUDE.md 의 이모지 규칙)
 RED_DOT = "\U0001f534"
 
@@ -51,7 +51,7 @@ def bold(text: str) -> str:
 def alert(text: str) -> str:
     """빨간 점을 붙여 굵게 표시한다.
 
-    **꼭 봐야 하는 것에만 쓴다** — 역방향 신호 · 실패 · 점검 이상. 정기 알림에 쓰면
+    **꼭 봐야 하는 것에만 쓴다** — 실패 · 점검 이상. 정기 알림에 쓰면
     색이 흔해져 정작 사건일 때 눈에 걸리지 않는다.
 
     Args:
@@ -73,18 +73,6 @@ def format_day(day: date) -> str:
         `MM-DD (요일)` 형태.
     """
     return f"{day:%m-%d} ({_WEEKDAYS[day.weekday()]})"
-
-
-def format_day_paren(day: date) -> str:
-    """날짜를 값 뒤에 덧붙이는 표기로 바꾼다.
-
-    Args:
-        day: 날짜.
-
-    Returns:
-        `(MM-DD 요일)` 형태.
-    """
-    return f"({day:%m-%d} {_WEEKDAYS[day.weekday()]})"
 
 
 def format_rate(rate: float, decimals: int = 2) -> str:
@@ -123,15 +111,3 @@ def format_krw(price: float, decimals: int = 0) -> str:
         천 단위를 끊고 단위를 붙인 문자열.
     """
     return f"{price:,.{decimals}f}원"
-
-
-def format_usd(price: float) -> str:
-    """달러 가격을 표기한다.
-
-    Args:
-        price: 가격.
-
-    Returns:
-        기호를 앞에 붙이고 소수 둘째 자리까지 끊은 문자열.
-    """
-    return f"${price:,.2f}"

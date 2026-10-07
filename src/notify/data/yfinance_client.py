@@ -1,4 +1,4 @@
-"""yfinance 로 시세를 받는다. 일봉 종가와 장중 현재가 둘 다 여기서 받는다.
+"""yfinance 로 일봉 종가를 받는다.
 
 **조정 종가를 쓴다.** 배당과 분할을 반영한 값이라야 백테스트가 낸 이동평균과 같은
 값이 나온다. 원시 종가로 계산하면 200일 이동평균이 0.1% 남짓 어긋나는데,
@@ -10,10 +10,6 @@
 조회가 왜 실패했는지가 실패 알림에서 사라진다 — 조회 한도에 걸린 것인지 종목이
 없어진 것인지 가릴 수 없으면 다시 돌릴지를 정할 수 없다. `Ticker.history` 는
 `raise_errors` 를 주면 예외를 그대로 올린다 (`docs/research/데이터소스_실측.md`).
-
-**한국 종목도 여기서 받는다.** pykrx 를 쓰지 않는 이유는 일봉 종가가 이미 같은 값으로
-확인됐고(`docs/research/데이터소스_실측.md`), pykrx 는 가져오는 시점에 로그인하면서
-**계정 아이디를 표준출력에 직접 찍기** 때문이다. 퍼블릭 저장소는 Actions 로그가 공개다.
 """
 
 from __future__ import annotations
@@ -33,10 +29,6 @@ DEFAULT_PERIOD = "1y"
 
 # 일봉 간격
 DAILY_INTERVAL = "1d"
-
-# 장중 조회 설정. 하루치 1분봉의 마지막 값이 현재가다
-INTRADAY_PERIOD = "1d"
-INTRADAY_INTERVAL = "1m"
 
 # 응답에서 읽을 컬럼
 _CLOSE_COLUMN = "Close"
@@ -174,74 +166,3 @@ def closes_through(closes: pd.Series, day: date, ticker: str) -> pd.Series:
         raise ValueError(f"[{ticker}] {day} 종가를 받지 못했습니다 ({latest}). 조회를 다시 실행하세요.")
 
     return through
-
-
-def first_change_day(closes: pd.Series, ticker: str) -> date:
-    """받은 종가로 등락률을 낼 수 있는 첫 날을 낸다.
-
-    **첫 종가에는 등락률이 없다** — 견줄 직전 종가가 창 밖이다. 그래서 두 번째 거래일이
-    계산 가능한 첫 날이고, 그보다 앞을 요구하면 종가를 날짜로 집는 자리에서 실패한다.
-
-    Args:
-        closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
-        ticker: 종목. 실패 문구에 쓴다.
-
-    Returns:
-        등락률을 낼 수 있는 첫 날.
-
-    Raises:
-        ValueError: 종가가 두 개보다 적을 때.
-    """
-    if len(closes) < 2:
-        raise ValueError(f"[{ticker}] 종가가 {len(closes)}개뿐이라 등락률을 낼 수 없습니다. 조회를 다시 실행하세요.")
-
-    return _index_date(closes.index[1])
-
-
-def close_on(closes: pd.Series, day: date, ticker: str) -> float:
-    """그 날짜의 종가를 고른다.
-
-    Args:
-        closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
-        day: 고를 날짜.
-        ticker: 종목. 실패 문구에 쓴다.
-
-    Returns:
-        그 날짜의 종가.
-
-    Raises:
-        ValueError: 그 날짜의 종가가 없을 때.
-    """
-    return float(closes_through(closes, day, ticker).iloc[-1])
-
-
-def fetch_intraday_price(ticker: str, today: date) -> float:
-    """장중 현재가를 받는다.
-
-    하루치 1분봉의 마지막 값을 쓴다. **일봉과 같은 조정 기준으로 받는다** —
-    전일 종가와 견주어 등락률을 내므로 기준이 갈리면 그 차이가 등락률에 섞인다.
-
-    **마지막 봉이 오늘 것인지 본다.** 어제 봉을 현재가로 쓰면 전일 종가와 엉뚱한 짝이 되어
-    등락률이 통째로 어긋난다. 1분봉은 20분 남짓 지연되지만 날짜는 같으므로 이 검사에 걸리지 않는다.
-
-    Args:
-        ticker: 받을 종목.
-        today: 오늘 날짜.
-
-    Returns:
-        현재가.
-
-    Raises:
-        ValueError: 조회가 실패했거나, 봉이 하나도 없거나, 마지막 봉이 오늘 것이 아닐 때.
-    """
-    series = _extract_close(_history(ticker, INTRADAY_PERIOD, INTRADAY_INTERVAL), ticker)
-    if series.empty:
-        raise ValueError(f"[{ticker}] 장중 시세가 비어 있습니다. 장이 열려 있는지 확인하세요.")
-
-    last_day = _index_date(series.index[-1])
-    if last_day != today:
-        raise ValueError(f"[{ticker}] 장중 시세의 마지막 봉이 {last_day} 입니다. {today} 시세가 아니라 판정에 쓸 수 없습니다.")
-
-    price = float(series.iloc[-1])
-    logger.debug(f"[{ticker}] 장중 현재가를 받았습니다 ({len(series)}봉, 마지막 {series.index[-1]})")
-    return price

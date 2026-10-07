@@ -1,4 +1,4 @@
-"""원달러 평균대비와 지난주 역방향 요약의 인바리언트를 고정한다.
+"""원달러 평균대비의 인바리언트를 고정한다.
 
 평균대비는 부호가 곧 의미다 — 음수면 평균보다 싸다. 부호가 뒤집히면 읽는 방향이
 통째로 반대가 되는데, 숫자만 보면 알아차릴 수 없다.
@@ -11,7 +11,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from notify.alerts.usdkrw import mean_deviation, weekly_extremes, window_slice
+from notify.alerts.usdkrw import mean_deviation, window_slice
 from notify.common_constants import USDKRW_WINDOW_YEARS
 
 
@@ -78,62 +78,6 @@ class TestMeanDeviation:
         """빈 창은 평균을 낼 수 없으므로 예외다."""
         with pytest.raises(ValueError):
             mean_deviation(current=1000.0, window_closes=pd.Series([], dtype="float64"))
-
-
-class TestWeeklyExtremes:
-    """지난주 역방향 요약 — 방향별 양끝."""
-
-    @staticmethod
-    def _week() -> pd.Series:
-        """한 주의 일간 등락률. 비율."""
-        return pd.Series(
-            [0.0082, -0.0350, 0.0120, -0.0015, 0.0210],
-            index=[date(2026, 8, 31), date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3), date(2026, 9, 4)],
-            dtype="float64",
-        )
-
-    def test_highest_is_the_most_risen_day(self) -> None:
-        """가장 오른 날을 낸다."""
-        result = weekly_extremes(self._week())
-
-        assert result.highest.change_rate == pytest.approx(0.0210)
-        assert result.highest.on == date(2026, 9, 4)
-
-    def test_lowest_is_the_most_fallen_day(self) -> None:
-        """가장 내린 날을 낸다."""
-        result = weekly_extremes(self._week())
-
-        assert result.lowest.change_rate == pytest.approx(-0.0350)
-        assert result.lowest.on == date(2026, 9, 1)
-
-    def test_two_ends_are_not_collapsed_into_one(self) -> None:
-        """양끝을 절대값 하나로 합치지 않는다.
-
-        이 주는 절대값이 가장 큰 날이 내린 쪽이라, 절대값으로 합치면 오른 쪽이
-        통째로 사라진다. 순위가 방향별로 매겨지므로 양쪽을 함께 내야 짝이 맞는다.
-        """
-        result = weekly_extremes(self._week())
-
-        assert abs(result.lowest.change_rate) > abs(result.highest.change_rate)
-        assert result.highest.on != result.lowest.on
-
-    def test_all_up_week_still_reports_a_lowest(self) -> None:
-        """모두 오른 주에도 가장 덜 오른 날을 최저로 낸다. 빈칸을 만들지 않는다."""
-        week = pd.Series(
-            [0.0100, 0.0200, 0.0050],
-            index=[date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 3)],
-            dtype="float64",
-        )
-
-        result = weekly_extremes(week)
-
-        assert result.lowest.change_rate == pytest.approx(0.0050)
-        assert result.highest.change_rate == pytest.approx(0.0200)
-
-    def test_empty_week_raises(self) -> None:
-        """거래일이 하나도 없으면 양끝을 만들 수 없으므로 예외다."""
-        with pytest.raises(ValueError):
-            weekly_extremes(pd.Series([], dtype="float64"))
 
 
 class TestWindowSlice:

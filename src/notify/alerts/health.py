@@ -3,18 +3,17 @@
 GitHub Actions 실행 이력을 읽을 뿐 아무것도 저장하지 않는다. 이력은 GitHub 이 이미
 갖고 있고 워크플로가 읽기만 한다.
 
-`2/2` 는 **"2번 돌았다"이지 "2번 알림이 왔다"가 아니다.** 역방향은 신호가 멀면 침묵하고
-그 실행도 성공으로 끝난다. 점검이 보는 것은 실행 여부이고, 발송 여부는 알림이 왔는지로 안다.
-둘을 섞으면 조용한 것이 정상인지를 다시 구분할 수 없게 된다.
+`5/5` 는 **"5번 돌았다"이지 "5번 알림이 왔다"가 아니다.** 버퍼존은 전날이 미국 휴장이면
+조용히 끝나고 그 실행도 성공으로 끝난다. 점검이 보는 것은 실행 여부이고, 발송 여부는 알림이
+왔는지로 안다. 둘을 섞으면 조용한 것이 정상인지를 다시 구분할 수 없게 된다.
 
-**자기 자신은 셀 수 없다.** 조회하는 시점에 아직 실행 중이다. 그래서 무엇을 언제 보는지가
-**그 워크플로의 발화 시각으로 정해진다** (`docs/DESIGN.md` §6.4).
+**자기 자신은 셀 수 없다.** 조회하는 시점에 아직 실행 중이다. 그래서 두 알림이 서로를 센다
+(`docs/DESIGN.md` §7.3).
 
-| 무엇 | 언제 도나 | 무엇을 보나 |
+| 무엇 | 언제 도나 | 누가 세나 |
 | --- | --- | --- |
-| 미국 역방향 | 버퍼존보다 **10분 먼저** | **당일** — 이미 끝나 있다 |
-| 한국 역방향 | 12:00 · 14:30 | 전일 — 아직 돌지 않았다 |
-| 주간 | 월요일 아침 | 지난주 · 지난 월요일 |
+| 버퍼존 | 화~토 아침 | 주간 알림이 지난주 월~토를 |
+| 주간 | 월요일 아침 | 버퍼존이 지난 월요일을 |
 
 **조회는 KST 하루를 UTC 구간으로 바꿔 묻는다.** GitHub 의 `created` 필터가 UTC 기준이라
 아침 알림은 전날로 밀린다 — `kst_day_window` 를 본다.
@@ -40,8 +39,6 @@ logger = get_logger(__name__)
 
 # 워크플로 파일 이름
 WORKFLOW_BUFFER_ZONE = "buffer_zone.yml"
-WORKFLOW_REVERSE_KR = "reverse_rank_kr.yml"
-WORKFLOW_REVERSE_US = "reverse_rank_us.yml"
 WORKFLOW_USDKRW = "usdkrw.yml"
 
 # 발화 요일. date.weekday() 를 쓴다 (0=월). cron-job.org 설정과 같아야 한다
@@ -49,11 +46,7 @@ WORKFLOW_USDKRW = "usdkrw.yml"
 # 미국장 알림은 화~토다 — 한국 아침에 보는 것은 전날 미국 종가이고,
 # 일·월은 전날이 항상 미국 휴장이라 부를 이유가 없다.
 _US_ALERT_WEEKDAYS = frozenset({1, 2, 3, 4, 5})
-_KR_ALERT_WEEKDAYS = frozenset({0, 1, 2, 3, 4})
 _WEEKLY_ALERT_WEEKDAY = 0
-
-# 한국 역방향은 하루 두 번 본다 (장중 12:00 · 14:30)
-_KR_RUNS_PER_DAY = 2
 
 # 조회가 실패했을 때 쓰는 표시. 본 알림은 그대로 발송한다
 LOOKUP_FAILED = "이력 조회 실패"
@@ -72,7 +65,7 @@ class HealthLine:
     """점검 블록의 한 줄.
 
     Attributes:
-        label: 무엇을 본 기간인지 (예: 전일).
+        label: 무엇을 본 기간인지 (예: 지난주).
         period: 그 기간의 날짜 표기.
         detail: 워크플로별 실행 횟수. 조회가 실패하면 그 사실을 적는다.
     """
@@ -98,9 +91,8 @@ def kst_day_bounds(day: date) -> tuple[datetime, datetime]:
     """KST 하루의 시작과 끝을 낸다.
 
     **`created` 필터는 UTC 기준인데 점검이 다루는 날짜는 KST 다.** 아침 알림은
-    07:20~07:30 KST 에 도는데 UTC 로는 전날 밤이라, 날짜를 그대로 넘기면 하루 어긋난
-    실행을 센다. 하필 그 자리에 **같은 아침에 도는 실행**이 있고 조회 시점에 아직
-    진행 중이므로, 예정대로 돌았는데도 0 으로 세어진다.
+    07:30 KST 에 도는데 UTC 로는 전날 밤이라, 날짜를 그대로 넘기면 하루 어긋난
+    실행을 센다 (`docs/DESIGN.md` §7.3 의 고장 경위).
 
     **끝을 `time.max` 가 아니라 23:59:59 로 잡는다.** GitHub 의 실행 시각은 초 단위라
     마이크로초는 어차피 질의에서 잘리는데, `time.max` 를 쓰면 그 절삭이 서식 문자열에
@@ -179,9 +171,7 @@ def expected_runs(workflow: str, day: date) -> int:
 
     if workflow == WORKFLOW_USDKRW:
         return 1 if weekday == _WEEKLY_ALERT_WEEKDAY else 0
-    if workflow == WORKFLOW_REVERSE_KR:
-        return _KR_RUNS_PER_DAY if weekday in _KR_ALERT_WEEKDAYS else 0
-    if workflow in (WORKFLOW_BUFFER_ZONE, WORKFLOW_REVERSE_US):
+    if workflow == WORKFLOW_BUFFER_ZONE:
         return 1 if weekday in _US_ALERT_WEEKDAYS else 0
 
     # 0 을 돌려주면 `actual < expected` 가 영원히 거짓이 되어 **덜 돌았을 때의 강조가
@@ -262,52 +252,6 @@ def _detail(entries: Sequence[tuple[str, str]], days: Sequence[date], count_runs
     return " · ".join(report.text for report in reports)
 
 
-def today_health(today: date, count_runs: RunCounter) -> HealthLine:
-    """오늘 이력을 담은 점검 줄을 만든다. 미국 역방향만 본다.
-
-    **미국 역방향은 버퍼존보다 10분 먼저 돈다** (`docs/DESIGN.md` §6.4). 그래서 같은
-    아침에 셀 수 있다 — 역방향은 신호가 멀면 침묵하므로 알림이 왔는지로는 돌았는지를
-    알 수 없고, 이 줄이 그것을 드러낸다.
-
-    **이 줄이 못 덮는 아침이 있다.** 전날이 미국 휴장이면 버퍼존 자체가 조용히 끝나
-    점검 블록이 아예 나가지 않는다 (`cli.run_buffer_zone`). 그 아침은 §7.2 의 나머지
-    감지 경로가 맡는다.
-
-    **한국 역방향은 여기 넣지 않는다.** 12:00·14:30 이라 이 시점에 아직 돌지 않았다.
-
-    Args:
-        today: 오늘 날짜. KST 다.
-        count_runs: 실행 수를 세는 함수.
-
-    Returns:
-        점검 줄.
-    """
-    return HealthLine(
-        label="오늘",
-        period=format_day(today),
-        detail=_detail([("역방향 US", WORKFLOW_REVERSE_US)], [today], count_runs),
-    )
-
-
-def previous_day_health(previous_day: date, count_runs: RunCounter) -> HealthLine:
-    """전일 이력을 담은 점검 줄을 만든다. 한국 역방향만 본다.
-
-    한국 역방향은 12:00·14:30 에 돌므로 아침 알림 시점에는 전일이 가장 최근이다.
-
-    Args:
-        previous_day: 전 거래일. KST 다.
-        count_runs: 실행 수를 세는 함수.
-
-    Returns:
-        점검 줄.
-    """
-    return HealthLine(
-        label="전일",
-        period=format_day(previous_day),
-        detail=_detail([("역방향 KR", WORKFLOW_REVERSE_KR)], [previous_day], count_runs),
-    )
-
-
 def weekly_health(start: date, end: date, count_runs: RunCounter) -> HealthLine:
     """지난주 이력을 담은 점검 줄을 만든다.
 
@@ -326,16 +270,8 @@ def weekly_health(start: date, end: date, count_runs: RunCounter) -> HealthLine:
         raise ValueError(f"지난주 시작일({start})이 종료일({end})보다 뒤입니다.")
 
     days = [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
-    # 한 줄에 셋이 나란히 서므로 뒤의 「역방향」을 되풀이하지 않는다.
-    # 정본 문구가 `버퍼존 5/5 · 역방향 KR 10/10 · US 5/5` 다 (docs/DESIGN.md 7.3 절).
-    # 오늘·전일 줄은 각각 하나뿐이라 생략이 성립하지 않아 「역방향 US」로 적는다
-    entries = [
-        ("버퍼존", WORKFLOW_BUFFER_ZONE),
-        ("역방향 KR", WORKFLOW_REVERSE_KR),
-        ("US", WORKFLOW_REVERSE_US),
-    ]
     return HealthLine(
         label="지난주",
         period=f"{format_day(start)} ~ {format_day(end)}",
-        detail=_detail(entries, days, count_runs),
+        detail=_detail([("버퍼존", WORKFLOW_BUFFER_ZONE)], days, count_runs),
     )

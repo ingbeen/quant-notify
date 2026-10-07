@@ -40,8 +40,6 @@ poetry run black .
 
 ```bash
 poetry run python -m notify buffer_zone --dry-run
-poetry run python -m notify reverse_rank_kr --dry-run
-poetry run python -m notify reverse_rank_us --dry-run
 poetry run python -m notify usdkrw --dry-run
 ```
 
@@ -51,10 +49,7 @@ poetry run python -m notify usdkrw --dry-run
 poetry run python -m notify buffer_zone
 ```
 
-> **역방향 알림은 신호가 멀면 아무것도 내지 않습니다.** 출력이 비어 있는 것이 정상이며,
-> 그때는 로그(표준에러)에 「신호가 여유 밖이라 보내지 않습니다」가 남습니다.
-
-> **휴장이면 조용히 끝납니다.** 이동평균과 미국 역방향은 한국 기준 어제가 미국 거래일이
+> **휴장이면 조용히 끝납니다.** 이동평균 알림은 한국 기준 어제가 미국 거래일이
 > 아니면 볼 새 종가가 없어 그대로 종료합니다.
 
 > `점검` 줄은 `GITHUB_REPOSITORY` 와 `GITHUB_TOKEN` 이 있어야 채워집니다. 로컬에서는
@@ -65,7 +60,7 @@ poetry run python -m notify buffer_zone
 ## cron-job.org 정시 트리거 설정
 
 워크플로는 `workflow_dispatch` 뿐이라 **누가 불러주지 않으면 돌지 않습니다.**
-cron-job.org 에 아래 잡 다섯 개를 만듭니다. 요일 근거는 [DESIGN.md](DESIGN.md) 6.4 절에 있습니다.
+cron-job.org 에 아래 잡 두 개를 만듭니다. 요일 근거는 [DESIGN.md](DESIGN.md) 6.4 절에 있습니다.
 
 **공통 설정** — 잡마다 URL 의 워크플로 파일명만 다릅니다.
 
@@ -84,15 +79,8 @@ Timezone  Asia/Seoul
 
 | 잡 | 크론탭 | 시각 (KST) | 워크플로 파일 |
 | --- | --- | --- | --- |
-| 역방향 US | `20 7 * * 2-6` | 화~토 **07:20** | `reverse_rank_us.yml` |
 | 버퍼존 | `30 7 * * 2-6` | 화~토 07:30 | `buffer_zone.yml` |
-| 역방향 KR | `0 12 * * 1-5` | 월~금 12:00 | `reverse_rank_kr.yml` |
-| 역방향 KR | `30 14 * * 1-5` | 월~금 14:30 | `reverse_rank_kr.yml` |
 | 주간 | `30 7 * * 1` | 월 07:30 | `usdkrw.yml` |
-
-> 🔴 **역방향 US 를 버퍼존보다 늦추지 마세요.** 버퍼존이 찍는 점검 줄이 **오늘 아침 US 가
-> 돌았는지**를 담습니다. 순서가 뒤집히면 매일 `🔴 역방향 US 0/1` 이 뜹니다.
-> 근거는 [DESIGN.md](DESIGN.md) 6.4 절에 있습니다.
 
 **API 버전은 `2026-03-10` 을 씁니다.** `2022-11-28` 은 2026-03-10 부로 deprecated 되었고
 2028-03-10 에 끊깁니다. 새 버전은 응답도 낫습니다 — `204 No Content` 대신 **`200 OK` 와 함께
@@ -122,13 +110,13 @@ https://github.com/settings/personal-access-tokens/new 에서 만듭니다.
 
 GitHub 웹 → **Actions** → 워크플로 선택 → **Run workflow**
 
-> **주간 알림은 월요일이 아닌 날에 돌려도 됩니다.** 「지난주」는 실행 요일이 아니라
-> 달력이 정하므로, 화요일에 복구 실행해도 직전 월~금 구간을 그대로 냅니다.
-> 근거는 [DESIGN.md](DESIGN.md) 4.4 절에 있습니다.
+> **주간 알림은 월요일이 아닌 날에 돌려도 됩니다.** 점검 줄의 「지난주」는 실행 요일이 아니라
+> 달력이 정하므로, 화요일에 복구 실행해도 직전 주를 그대로 셉니다.
+> 근거는 [DESIGN.md](DESIGN.md) 7.3 절에 있습니다.
 
 ### 보내지 않고 확인하기 (`dry_run`)
 
-워크플로 넷 모두 **`dry_run` 입력**을 받습니다. 참이면 문구를 **실행 로그에만 찍고
+워크플로 둘 모두 **`dry_run` 입력**을 받습니다. 참이면 문구를 **실행 로그에만 찍고
 텔레그램으로 보내지 않습니다.** 웹에서는 `Run workflow` 를 누를 때 나오는 체크박스입니다.
 
 REST API 로 부를 때는 본문에 넣습니다. 값은 **문자열** 이어야 합니다.
@@ -148,8 +136,6 @@ curl -X POST \
 
 ```bash
 gh workflow run buffer_zone.yml -f dry_run=true
-gh workflow run reverse_rank_kr.yml
-gh workflow run reverse_rank_us.yml
 gh workflow run usdkrw.yml
 ```
 
@@ -161,7 +147,7 @@ gh workflow run usdkrw.yml
 
 ```bash
 # 특정 날짜(KST)의 성공 실행 수 — 점검 줄과 같은 구간으로 묻습니다
-gh api -X GET repos/ingbeen/quant-notify/actions/workflows/reverse_rank_us.yml/runs \
+gh api -X GET repos/ingbeen/quant-notify/actions/workflows/buffer_zone.yml/runs \
   -f created="2026-09-09T15:00:00Z..2026-09-10T14:59:59Z" -f status=success \
   --jq '{total_count, runs: [.workflow_runs[] | .created_at]}'
 
@@ -170,8 +156,7 @@ gh run list --status=failure --limit=10
 ```
 
 > 🔴 **`--created=2026-09-04` 같은 날짜 하나로 묻지 마세요. 그 필터는 UTC 기준입니다.**
-> 아침 알림(역방향 US 07:20 · 버퍼존 07:30 · 주간 월 07:30)은 UTC 로 **전날 22:20~22:30**
-> 이라 하루 어긋난 결과가 나오고, **에러는 나지 않습니다.** 한국 역방향(12:00·14:30)만
-> UTC 로도 날짜가 같아 우연히 맞습니다. 위 예시의 `전날 15:00:00Z..당일 14:59:59Z` 가
+> 아침 알림(버퍼존 07:30 · 주간 월 07:30)은 UTC 로 **전날 22:30**
+> 이라 하루 어긋난 결과가 나오고, **에러는 나지 않습니다.** 위 예시의 `전날 15:00:00Z..당일 14:59:59Z` 가
 > KST 하루입니다. 근거는 [DESIGN.md](DESIGN.md) 7.3 절과
 > `research/데이터소스_실측.md` §7 에 있습니다.

@@ -5,8 +5,6 @@ SPY·QQQ·GLD·TLT 넷 모두의 09-08 행이 그랬고, 약 1시간 40분 뒤 �
 
 빈 값은 `_extract_close` 가 떨구므로 **자취가 남지 않는다.** 남은 계열의 끝을 그대로
 쓰면 하루 전 종가로 판정하게 되는데, 알림 형태로는 정상으로 보여 알아차릴 수 없다.
-특히 미국 역방향은 전일 종가와 당일 종가를 함께 읽으므로, 가운데 하루가 비면
-**신호 가격 전체가 어긋난다.**
 
 그래서 위치가 아니라 **날짜로** 고르고, 없으면 멈춘다 (`docs/DESIGN.md` 7.4절
 「보간하지 않습니다 — 값이 없으면 없다고 하고 멈춥니다」). 이 파일이 그 규칙을 지킨다.
@@ -21,20 +19,16 @@ import pytest
 
 from notify import cli
 from notify.common_constants import TZ_KST
-from notify.data.yfinance_client import close_on
+from notify.data.yfinance_client import closes_through
 
-KODEX = "069500.KS"
 QQQ = "QQQ"
 
-# 2026-09-07(월)은 미국 노동절 휴장이고 한국은 거래일이다. 두 달력이 갈리는 날이라
-# 미국에서 09-08 의 직전 거래일은 09-04(금)로 건너뛰고, 한국에서는 09-07 이다
+# 2026-09-07(월)은 미국 노동절 휴장이다. 09-08(화) 아침 버퍼존은 볼 종가가 없다
 FRI = date(2026, 9, 4)
-MON = date(2026, 9, 7)
 TUE = date(2026, 9, 8)
 WED = date(2026, 9, 9)
 
 NEW_YORK = "America/New_York"
-SEOUL = "Asia/Seoul"
 
 
 def _series(days: list[date], values: list[float], tz: str = NEW_YORK) -> pd.Series:
@@ -101,45 +95,13 @@ def _forbid_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("휴장일에는 시세를 받지 않는다")
 
     monkeypatch.setattr(cli, "fetch_closes", never)
-    monkeypatch.setattr(cli, "fetch_intraday_price", never)
 
 
-class TestCloseOn:
-    """그 날짜의 종가 고르기."""
+class TestClosesThroughFailure:
+    """그 날짜의 종가가 없을 때.
 
-    def test_picks_the_close_on_that_day(self) -> None:
-        """요청한 날짜의 종가를 돌려준다."""
-        closes = _series([FRI, TUE], [718.96, 718.36])
-
-        assert close_on(closes, TUE, QQQ) == 718.36
-
-    def test_picks_by_date_not_by_position(self) -> None:
-        """마지막 행이 아니라 **요청한 날짜**를 고른다.
-
-        뒤에 더 최근 행이 붙어 와도 판정 대상 날짜의 값을 써야 한다.
-        """
-        closes = _series([FRI, TUE, WED], [718.96, 718.36, 730.00])
-
-        assert close_on(closes, TUE, QQQ) == 718.36
-
-    def test_reads_a_new_york_index(self) -> None:
-        """미국 종목의 `America/New_York` 인덱스에서도 날짜로 맞춘다."""
-        closes = _series([FRI, TUE], [770.19, 765.96], tz=NEW_YORK)
-
-        assert close_on(closes, TUE, "SPY") == 765.96
-
-    def test_reads_a_seoul_index(self) -> None:
-        """한국 종목의 `Asia/Seoul` 인덱스에서도 같다."""
-        closes = _series([FRI, MON], [105720.0, 110820.0], tz=SEOUL)
-
-        assert close_on(closes, MON, KODEX) == 110820.0
-
-    def test_raises_when_that_day_is_missing(self) -> None:
-        """그 날짜가 없으면 멈춘다. 하루 전 값으로 대신하지 않는다."""
-        closes = _series([FRI], [718.96])
-
-        with pytest.raises(ValueError):
-            close_on(closes, TUE, QQQ)
+    날짜로 자르는 정상 경로는 `test_weekly_window.TestClosesThrough` 가 고정한다.
+    """
 
     def test_message_names_the_ticker_and_both_days(self) -> None:
         """실패 문구가 종목·요청 날짜·마지막 종가일을 담는다.
@@ -150,7 +112,7 @@ class TestCloseOn:
         closes = _series([FRI], [718.96])
 
         with pytest.raises(ValueError) as caught:
-            close_on(closes, TUE, QQQ)
+            closes_through(closes, TUE, QQQ)
 
         message = str(caught.value)
         assert QQQ in message
@@ -160,74 +122,7 @@ class TestCloseOn:
     def test_raises_on_empty_series(self) -> None:
         """계열이 비어도 그 자리에서 멈춘다."""
         with pytest.raises(ValueError):
-            close_on(_series([], []), TUE, QQQ)
-
-
-class TestUnitedStatesPricesNeedBothDays:
-    """미국 역방향은 전일 종가와 당일 종가를 **둘 다** 날짜로 확인한다."""
-
-    def test_pairs_the_target_with_the_previous_trading_day(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """직전 거래일이 휴장을 건너뛴다. 09-08 의 짝은 09-07(노동절)이 아니라 09-04 다."""
-        _install_closes(monkeypatch, {QQQ: _series([FRI, TUE], [718.96, 718.36])})
-
-        inputs = cli._united_states_prices(_at(WED, 7, 30))
-
-        assert inputs is not None
-        assert (inputs.prev_close, inputs.current) == (718.96, 718.36)
-        assert inputs.last_confirmed == TUE
-
-    def test_raises_when_the_target_close_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """당일 종가가 비면 멈춘다. 하루 전 종가로 판정하지 않는다."""
-        _install_closes(monkeypatch, {QQQ: _series([date(2026, 9, 3), FRI], [717.67, 718.96])})
-
-        with pytest.raises(ValueError):
-            cli._united_states_prices(_at(WED, 7, 30))
-
-    def test_raises_when_the_previous_trading_day_close_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """전일 종가가 비면 멈춘다.
-
-        당일 종가만 보면 정상으로 보이는 자리다. 09-08 이 빠진 채 09-09 가 채워지면
-        `iloc[-2]` 는 09-04 를 집어 **전일 종가가 나흘 전 값**이 된다.
-        """
-        _install_closes(monkeypatch, {QQQ: _series([FRI, WED], [718.96, 730.00])})
-
-        with pytest.raises(ValueError):
-            cli._united_states_prices(_at(date(2026, 9, 10), 7, 30))
-
-    def test_holiday_stays_silent_without_fetching(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """휴장이면 조용히 끝낸다. 가드가 휴장을 실패로 바꾸지 않는다."""
-        _forbid_fetch(monkeypatch)
-
-        assert cli._united_states_prices(_at(TUE, 7, 30)) is None
-
-
-class TestKoreaPricesNeedThePreviousTradingDay:
-    """한국 역방향의 전일 종가도 날짜로 고른다."""
-
-    def test_skips_the_unconfirmed_bar_of_today(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """장중에 섞여 온 당일 미확정 봉을 전일 종가로 쓰지 않는다."""
-        _install_closes(monkeypatch, {KODEX: _series([FRI, MON, TUE], [105720.0, 110820.0, 110335.0], tz=SEOUL)})
-        monkeypatch.setattr(cli, "fetch_intraday_price", lambda ticker, today: 111000.0)
-
-        inputs = cli._korea_prices(_at(TUE, 14, 30))
-
-        assert inputs is not None
-        assert (inputs.prev_close, inputs.current) == (110820.0, 111000.0)
-        assert inputs.last_confirmed == MON
-
-    def test_raises_when_the_previous_trading_day_close_is_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """직전 한국 거래일 종가가 비면 멈춘다. 그 전날로 밀려 쓰지 않는다."""
-        _install_closes(monkeypatch, {KODEX: _series([FRI, TUE], [105720.0, 110335.0], tz=SEOUL)})
-        monkeypatch.setattr(cli, "fetch_intraday_price", lambda ticker, today: 111000.0)
-
-        with pytest.raises(ValueError):
-            cli._korea_prices(_at(TUE, 14, 30))
-
-    def test_holiday_stays_silent_without_fetching(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """한국 휴장이면 조용히 끝낸다."""
-        _forbid_fetch(monkeypatch)
-
-        assert cli._korea_prices(_at(date(2026, 9, 6), 14, 30)) is None
+            closes_through(_series([], []), TUE, QQQ)
 
 
 class TestBufferZoneNeedsTheTargetClose:

@@ -1,4 +1,4 @@
-"""원달러 평균대비와 지난주 역방향 요약을 계산한다.
+"""원달러 평균대비를 계산한다.
 
 평균대비는 부호가 곧 의미다 — 음수면 평균보다 싸다. 판정 어휘를 붙이지 않고
 숫자만 낸다.
@@ -12,32 +12,8 @@ from datetime import date, datetime
 
 import pandas as pd
 
-from notify.alerts.formatting import (
-    alert,
-    bold,
-    format_day,
-    format_day_paren,
-    format_krw,
-    format_rate,
-)
+from notify.alerts.formatting import bold, format_day, format_krw, format_rate
 from notify.alerts.health import HealthLine
-from notify.alerts.reverse_rank import reached_threshold
-
-
-@dataclass(frozen=True)
-class WeeklyExtreme:
-    """한 주의 한쪽 끝."""
-
-    change_rate: float
-    on: date
-
-
-@dataclass(frozen=True)
-class WeeklyExtremes:
-    """한 주의 양끝. 가장 오른 날과 가장 내린 날을 함께 낸다."""
-
-    highest: WeeklyExtreme
-    lowest: WeeklyExtreme
 
 
 def mean_deviation(current: float, window_closes: pd.Series) -> float:
@@ -63,49 +39,6 @@ def mean_deviation(current: float, window_closes: pd.Series) -> float:
     return current / mean - 1
 
 
-def _extreme_at(daily_changes: pd.Series, label: object) -> WeeklyExtreme:
-    """지정한 날의 등락률을 한쪽 끝으로 만든다.
-
-    Args:
-        daily_changes: 일간 등락률 계열. 날짜를 인덱스로 갖는다.
-        label: 인덱스 값.
-
-    Returns:
-        그 날의 등락률과 날짜.
-
-    Raises:
-        RuntimeError: 인덱스가 날짜가 아닐 때.
-    """
-    if not isinstance(label, date):
-        raise RuntimeError(f"내부 불변조건 위반: 등락률 인덱스가 날짜가 아닙니다: {label!r}")
-
-    return WeeklyExtreme(change_rate=float(daily_changes[label]), on=label)
-
-
-def weekly_extremes(daily_changes: pd.Series) -> WeeklyExtremes:
-    """한 주의 양끝을 낸다.
-
-    가장 오른 날과 가장 내린 날을 각각 낸다. 절대값 하나로 합치지 않는다 —
-    순위가 방향별로 매겨지므로 양쪽을 함께 내야 폭등·폭락 줄과 짝이 맞는다.
-
-    Args:
-        daily_changes: 일간 등락률 계열. 날짜를 인덱스로 갖는다. 비율.
-
-    Returns:
-        가장 오른 날과 가장 내린 날.
-
-    Raises:
-        ValueError: 거래일이 하나도 없을 때.
-    """
-    if daily_changes.empty:
-        raise ValueError("지난주 거래일이 없어 양끝을 낼 수 없습니다.")
-
-    return WeeklyExtremes(
-        highest=_extreme_at(daily_changes, daily_changes.idxmax()),
-        lowest=_extreme_at(daily_changes, daily_changes.idxmin()),
-    )
-
-
 @dataclass(frozen=True)
 class WindowLine:
     """창 하나의 평균과 평균대비."""
@@ -113,38 +46,6 @@ class WindowLine:
     years: int
     mean_price: float
     deviation_rate: float
-
-
-@dataclass(frozen=True)
-class ReverseLine:
-    """역방향 요약 한 방향.
-
-    지난주 값이 무엇인지(최고·최저·신호)는 저장하지 않고 문구를 만들 때 정한다.
-    라벨과 강조 여부가 같은 판정에서 나오므로, 두 곳에서 따로 정하면 어긋난다.
-
-    Attributes:
-        direction: 폭등 또는 폭락.
-        rate_1st: 1위 등락률.
-        rank_cut: 순위 컷. 문구의 `N위` 가 된다.
-        rate_cut: 순위 컷 등락률.
-        extreme_rate: 지난주 값.
-        extreme_on: 그 값이 나온 날.
-    """
-
-    direction: str
-    rate_1st: float
-    rank_cut: int
-    rate_cut: float
-    extreme_rate: float
-    extreme_on: date
-
-
-@dataclass(frozen=True)
-class ReverseBlock:
-    """종목 하나의 역방향 요약."""
-
-    symbol: str
-    lines: Sequence[ReverseLine]
 
 
 def window_slice(closes: pd.Series, end: date, years: int) -> pd.Series:
@@ -184,54 +85,11 @@ def _window_rows(windows: Sequence[WindowLine]) -> list[str]:
     ]
 
 
-def _extreme_row(line: ReverseLine) -> str:
-    """지난주 값 줄을 만든다.
-
-    **신호였으면 강조한다.** 역방향은 몇 달을 조용할 수 있어, 있었던 주에는
-    그 줄이 눈에 걸려야 한다.
-
-    Args:
-        line: 역방향 요약 한 방향.
-
-    Returns:
-        지난주 값 줄.
-    """
-    value = f"{format_rate(line.extreme_rate)} {format_day_paren(line.extreme_on)}"
-    if reached_threshold(line.extreme_rate, line.rate_cut):
-        return alert(f"지난주 신호 {value}")
-
-    label = "지난주 최고" if line.rate_cut >= 0 else "지난주 최저"
-    return f"{label} {value}"
-
-
-def _reverse_rows(blocks: Sequence[ReverseBlock]) -> list[str]:
-    """역방향 요약 줄을 만든다.
-
-    Args:
-        blocks: 종목별 요약.
-
-    Returns:
-        줄 목록. 종목 사이를 빈 줄로 나눈다.
-    """
-    rows: list[str] = []
-    for index, block in enumerate(blocks):
-        if index:
-            rows.append("")
-        rows.append(bold(f"역방향 · {block.symbol}"))
-        for line in block.lines:
-            rows.append(
-                f"{line.direction} 1위 {format_rate(line.rate_1st)}" f" / {line.rank_cut}위 {format_rate(line.rate_cut)}"
-            )
-            rows.append(_extreme_row(line))
-    return rows
-
-
 def render(
     sent_at: datetime,
     current: float,
     as_of: date,
     windows: Sequence[WindowLine],
-    reverses: Sequence[ReverseBlock],
     health: HealthLine,
 ) -> str:
     """원달러 주간 알림 문구를 만든다.
@@ -244,7 +102,6 @@ def render(
         current: 현재 환율.
         as_of: 그 환율의 기준일.
         windows: 창별 평균과 평균대비.
-        reverses: 종목별 역방향 요약.
         health: 점검 항목.
 
     Returns:
@@ -264,8 +121,6 @@ def render(
         "",
         *_window_rows(windows),
     ]
-    if reverses:
-        rows += ["", *_reverse_rows(reverses)]
     rows += ["", bold("점검"), f"{health.label} {health.period}", health.detail]
 
     return "\n".join(rows)

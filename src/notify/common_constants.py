@@ -15,7 +15,6 @@ from zoneinfo import ZoneInfo
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATE_DIR = PROJECT_ROOT / "state"
 POSITIONS_PATH = STATE_DIR / "positions.toml"
-REVERSE_RANK_PATH = STATE_DIR / "reverse_rank.toml"
 
 # 로컬 자격증명. git 에서 제외돼 있고 워크플로에는 존재하지 않는다 (utils/config.py)
 ENV_FILE_PATH = PROJECT_ROOT / ".env"
@@ -36,12 +35,6 @@ MA_PERIOD = 200
 # 매수선·매도선. 정본은 quant FIXED_4P_BUY_BUFFER_ZONE_PCT · FIXED_4P_SELL_BUFFER_ZONE_PCT 다
 BUY_BUFFER_ZONE_RATE = 0.03  # 매수선 비율 (0.03 = 이동평균의 3% 위)
 SELL_BUFFER_ZONE_RATE = 0.05  # 매도선 비율 (0.05 = 이동평균의 5% 아래)
-
-# 역방향 알림 여유. 비율 (0.01 = 1%p)
-REVERSE_MARGIN_RATE = 0.01
-
-# 하루 등락률이 넘을 수 없는 크기. 비율을 퍼센트로 잘못 적은 값을 걸러낸다
-MAX_DAILY_CHANGE_RATE = 1.0
 
 # 원달러를 견주는 창 (년)
 USDKRW_WINDOW_YEARS: tuple[int, ...] = (1, 3, 5, 10)

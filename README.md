@@ -8,11 +8,9 @@ GitHub Actions 에서 돌고, **매일 갱신되는 누적 상태를 갖지 않�
 | 알림 | 시각 (KST) | 내용 |
 | --- | --- | --- |
 | `buffer_zone` | 화~토 아침 | SPY · QQQ · GLD · TLT 의 200일 이동평균 근접도 + 보유 종목과 비중 |
-| `reverse_rank_kr` | 월~금 12:00 · 14:30 | KODEX 200 이 역대 상위 순위 컷(`state/reverse_rank.toml` 의 `rank_cut`) 등락률에 접근하면 알림. **멀면 침묵** |
-| `reverse_rank_us` | 화~토 아침 | QQQ 에 대해 같은 판정. **멀면 침묵** |
-| `usdkrw` | 월요일 아침 | 원달러가 1·3·5·10년 평균 대비 어디인지 + 지난주 역방향 요약 |
+| `usdkrw` | 월요일 아침 | 원달러가 1·3·5·10년 평균 대비 어디인지 |
 
-미국장 알림이 화~토인 것은 한국 아침에 **전날 미국 종가**를 보기 때문입니다 — 금요일 종가는
+`buffer_zone` 이 화~토인 것은 한국 아침에 **전날 미국 종가**를 보기 때문입니다 — 금요일 종가는
 토요일 아침에 보고, 일·월에는 볼 새 종가가 없습니다.
 
 ## 왜 이렇게 생겼나
@@ -29,7 +27,7 @@ cron 이 7시간 45분 밀려 처리 대상 날짜가 하루 건너뛰었고, �
 docs/DESIGN.md     왜 이렇게 생겼는지 — 설계의 정본
 reference/         verify-lab 매매 규칙 스냅샷 (판정 근거)
 src/notify/        알림 구현
-state/             사람이 손으로 쓰는 파일 (보유 종목, 순위 등락률)
+state/             사람이 손으로 쓰는 파일 (보유 종목)
 ```
 
 실행 명령은 [docs/COMMANDS.md](docs/COMMANDS.md) 를 봅니다.
@@ -39,6 +37,6 @@ state/             사람이 손으로 쓰는 파일 (보유 종목, 순위 등�
 - Python 3.12 · Poetry
 - 시크릿 셋 — `TELEGRAM_BOT_TOKEN` · `TELEGRAM_CHAT_ID` · `ECOS_API_KEY`
 - 정시 트리거 — cron-job.org 가 GitHub `workflow_dispatch` 를 호출합니다
-  (GitHub 의 `schedule` 은 중앙값 64분 밀려 장중 알림에 쓸 수 없습니다)
+  (GitHub 의 `schedule` 은 중앙값 64분 밀립니다 — [docs/DESIGN.md](docs/DESIGN.md) §6)
 - 그 호출에 쓸 **fine-grained PAT** — 이 저장소의 `Actions: Read and write` 하나면 됩니다.
   발급과 cron 설정은 [docs/COMMANDS.md](docs/COMMANDS.md) 에 있습니다
