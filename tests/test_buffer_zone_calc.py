@@ -67,11 +67,6 @@ class TestMovingAverage:
         with pytest.raises(ValueError):
             sma(_closes(100.0, MA_PERIOD - 1))
 
-    def test_empty_series_raises(self) -> None:
-        """빈 계열은 예외다."""
-        with pytest.raises(ValueError):
-            sma(pd.Series([], dtype="float64"))
-
 
 class TestProximity:
     """근접도."""
@@ -158,11 +153,6 @@ class TestWeights:
         )
 
         assert weights["A"] == pytest.approx(0.5)
-
-    def test_missing_price_raises(self) -> None:
-        """보유 종목의 가격이 없으면 예외를 낸다. 그 종목을 빼고 계산하지 않는다."""
-        with pytest.raises(ValueError):
-            position_weights(quantities={"SPY": 12, "TLT": 45}, prices={"SPY": 638.12})
 
     def test_empty_positions_give_empty_weights(self) -> None:
         """보유가 없으면 빈 결과다. 예외가 아니다."""

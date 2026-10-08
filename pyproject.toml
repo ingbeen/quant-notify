@@ -22,7 +22,6 @@ pandas-stubs = "^2.0.0"
 types-requests = "^2.31.0"
 pytest = "^9.0.2"
 pytest-cov = "^7.0.0"
-freezegun = "^1.5.5"
 pyright = "^1.1.407"
 
 [build-system]
@@ -32,12 +31,10 @@ build-backend = "poetry.core.masonry.api"
 [tool.black]
 line-length = 120
 target-version = ['py312']
-extend-exclude = "^/reference/"
 
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["reference"]
 
 [tool.ruff.lint]
 select = [

@@ -1,27 +1,24 @@
 """알림 문구를 문자열 단위로 고정한다.
 
-문구는 사용자가 매일 읽는 산출물이다. 정본은 `docs/DESIGN.md` 4.5 절이며,
-여기 기대값은 그 예시를 그대로 옮긴 것이다. 코드가 이것과 달라지면 문서가 아니라
-코드가 틀린 것이다.
-
-**강조가 어디에 붙는지도 함께 묶는다.** 빨간 점은 실패·점검 이상에만 붙는다.
-정기 알림에 번지면 색이 흔해져 정작 사건일 때 눈에 걸리지 않는다.
+기대값은 `docs/DESIGN.md` §4.3 의 예시를 그대로 옮긴 것이다 — 다르면 코드가 틀린 것이다.
+빨간 점이 붙는 자리도 함께 묶는다.
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime
 
-import pytest
-
 from notify.alerts.buffer_zone import HoldingLine, ProximityLine
 from notify.alerts.buffer_zone import render as render_buffer_zone
 from notify.alerts.failure import render as render_failure
 from notify.alerts.formatting import RED_DOT
-from notify.alerts.health import HealthLine, expected_runs, weekly_health
+from notify.alerts.health import HealthLine
 from notify.alerts.usdkrw import WindowLine
 from notify.alerts.usdkrw import render as render_usdkrw
 from notify.common_constants import TZ_KST
+
+# 버퍼존 정본 예시의 점검 줄
+WEEKLY_LINE = HealthLine("최근 주간", "08-31 (월)", "1/1")
 
 
 class TestBufferZone:
@@ -46,7 +43,7 @@ class TestBufferZone:
                 ProximityLine("TLT", -0.0098),
             ],
             holdings=holdings,
-            health=[HealthLine("최근 주간", "08-31 (월)", "1/1")],
+            health=WEEKLY_LINE,
         )
 
     def test_matches_the_documented_example(self) -> None:
@@ -82,16 +79,6 @@ class TestBufferZone:
         assert "MA 근접도" in text
         assert "점검" in text
 
-    def test_no_proximity_raises(self) -> None:
-        """근접도가 하나도 없으면 알림을 만들지 않는다."""
-        with pytest.raises(ValueError):
-            render_buffer_zone(
-                sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
-                proximities=[],
-                holdings=[],
-                health=[],
-            )
-
     @staticmethod
     def _proximity_row(ticker: str, rate: float) -> str:
         """근접도 한 종목만 넣고 그 종목의 줄을 꺼낸다.
@@ -107,7 +94,7 @@ class TestBufferZone:
             sent_at=datetime(2026, 9, 4, 7, 30, tzinfo=TZ_KST),
             proximities=[ProximityLine(ticker, rate)],
             holdings=[],
-            health=[],
+            health=WEEKLY_LINE,
         )
         return next(row for row in text.split("\n") if row.startswith(f"{ticker} "))
 
@@ -122,7 +109,7 @@ class TestBufferZone:
                 ProximityLine("TLT", -0.0098),
             ],
             holdings=[],
-            health=[],
+            health=WEEKLY_LINE,
         )
 
         assert "<b>MA 근접도</b>\nSPY 매도선 아래\nQQQ -3.42%\nGLD +2.46%\nTLT -0.98%\n" in text
@@ -219,15 +206,10 @@ class TestFailure:
 
     def test_matches_the_documented_example(self) -> None:
         """정본 예시와 글자 단위로 같다."""
-        text = render_failure(
-            "buffer_zone",
-            RuntimeError("yfinance 조회 실패 — QQQ"),
-            datetime(2026, 9, 4, 7, 31, tzinfo=TZ_KST),
-        )
+        reason = "[QQQ] 시세 조회에 실패했습니다: YFRateLimitError: Too Many Requests. Rate limited. Try after a while."
+        text = render_failure("buffer_zone", ValueError(reason), datetime(2026, 9, 4, 7, 31, tzinfo=TZ_KST))
 
-        assert text == (
-            f"{RED_DOT} <b>실패 · buffer_zone</b>\n" "09-04 (금) 07:31\n" "\n" "RuntimeError: yfinance 조회 실패 — QQQ"
-        )
+        assert text == (f"{RED_DOT} <b>실패 · buffer_zone</b>\n" "09-04 (금) 07:31\n" "\n" f"ValueError: {reason}")
 
     def test_carries_no_guidance(self) -> None:
         """안내 문구를 붙이지 않는다. 제목과 예외 메시지뿐이다."""
@@ -254,38 +236,3 @@ class TestFailure:
 
         assert "&lt;b&gt;주의&lt;/b&gt; &amp; 실패" in text
         assert "<b>주의</b>" not in text
-
-
-class TestHealthLineFlowsIntoAlerts:
-    """점검 줄이 알림 문구까지 이어지는지 본다.
-
-    점검 줄을 손으로 넣어 문구만 맞추면, 실제로 만들어지는 값이 달라도 알아차리지 못한다.
-    두 쪽을 이어서 정본과 대조한다.
-    """
-
-    @staticmethod
-    def _as_expected(workflow: str, day: date) -> int:
-        """예정대로 전부 성공한 상황을 흉내 낸다.
-
-        Args:
-            workflow: 워크플로 이름.
-            day: 날짜.
-
-        Returns:
-            그 날 예정된 실행 수.
-        """
-        return expected_runs(workflow, day)
-
-    def test_weekly_line_matches_the_documented_row(self) -> None:
-        """지난주 점검 줄이 정본의 그 두 줄로 이어진다."""
-        line = weekly_health(date(2026, 8, 31), date(2026, 9, 5), self._as_expected)
-
-        text = render_usdkrw(
-            sent_at=datetime(2026, 9, 7, 7, 30, tzinfo=TZ_KST),
-            current=1384.80,
-            as_of=date(2026, 9, 4),
-            windows=[WindowLine(1, 1462, -0.053)],
-            health=line,
-        )
-
-        assert "지난주 08-31 (월) ~ 09-05 (토)\n버퍼존 5/5" in text

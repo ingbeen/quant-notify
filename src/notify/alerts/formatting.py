@@ -1,24 +1,13 @@
-"""알림 문구의 공통 표기 규칙.
-
-문구는 텔레그램 HTML 모드로 보낸다. **강조 수단은 굵게와 빨간 점 둘뿐이다** —
-텔레그램은 글자 색을 지원하지 않고, 고정폭(`<pre>`)은 다른 서식과 조합할 수 없어
-강조를 넣으려면 고정폭을 버려야 한다.
-
-그래서 **한 줄에 값 하나를 쌓는다.** 정렬로 뜻을 나르지 않으므로 가로 폭 제약이 없다.
-모바일은 긴 줄을 낱말 단위로 접으므로, 열을 맞춰도 좁은 화면에서 그대로 무너진다.
-
-표기 규칙의 정본은 `docs/DESIGN.md` 4.5 절이다.
-"""
+"""알림 문구의 공통 표기. 표기 규칙과 그 근거의 정본은 `docs/DESIGN.md` §4.3 이다."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 # 한글 요일. date.weekday() 순서에 맞춘다
 _WEEKDAYS = ("월", "화", "수", "목", "금", "토", "일")
 
-# 눈에 띄어야 하는 것에만 붙인다 — 실패 · 점검 이상.
-# 소스를 ASCII 로 유지하려고 이스케이프로 적는다 (루트 CLAUDE.md 의 이모지 규칙)
+# 빨간 점. 소스를 ASCII 로 두려고 이스케이프로 적는다 (전역 규칙 「코드 파일에는 이모지를 쓰지 않는다」)
 RED_DOT = "\U0001f534"
 
 
@@ -49,10 +38,7 @@ def bold(text: str) -> str:
 
 
 def alert(text: str) -> str:
-    """빨간 점을 붙여 굵게 표시한다.
-
-    **꼭 봐야 하는 것에만 쓴다** — 실패 · 점검 이상. 정기 알림에 쓰면
-    색이 흔해져 정작 사건일 때 눈에 걸리지 않는다.
+    """빨간 점을 붙여 굵게 표시한다. 붙이는 자리는 `docs/DESIGN.md` §4.3 이 정한다.
 
     Args:
         text: 강조할 문자열.
@@ -73,6 +59,18 @@ def format_day(day: date) -> str:
         `MM-DD (요일)` 형태.
     """
     return f"{day:%m-%d} ({_WEEKDAYS[day.weekday()]})"
+
+
+def format_sent_at(sent_at: datetime) -> str:
+    """발송 시각을 알림 표기로 바꾼다.
+
+    Args:
+        sent_at: 발송 시각.
+
+    Returns:
+        `MM-DD (요일) HH:MM` 형태.
+    """
+    return f"{format_day(sent_at.date())} {sent_at:%H:%M}"
 
 
 def format_rate(rate: float, decimals: int = 2) -> str:

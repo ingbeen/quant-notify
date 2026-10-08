@@ -1,39 +1,32 @@
-"""점검 줄을 고정한다.
+"""점검 줄과 그 조회를 고정한다.
 
-점검은 조용한 것과 죽은 것을 가른다. 분모(예정 횟수)가 틀리면 정상인데 이상해 보이거나
-이상한데 정상으로 보인다.
-
-**분모는 요일로만 센다.** 분자가 워크플로 실행 이력을 세므로 분모도 실행 기준이어야 한다 —
-휴장이어도 워크플로는 돌고 조용히 끝나며 성공으로 집계된다. 이 파일은 그 정합을 지킨다.
-
-**분자는 KST 하루를 본다.** GitHub 의 `created` 필터가 UTC 기준이라, 07:30 KST 에 도는
-아침 알림은 UTC 로 전날이 된다. 날짜를 그대로 넘기면 하루 어긋난 실행을 세게 된다.
-
-조회가 실패해도 본 알림은 나가야 한다 — 점검 때문에 알림이 막히면 안 된다.
+분모는 요일로만, 분자는 KST 하루의 실행 이력으로 센다. 조회가 실패해도 본 알림은 나간다
+(`docs/DESIGN.md` §7.3).
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 import pytest
+import requests
 
 from notify import cli
-from notify.alerts import health
 from notify.alerts.formatting import RED_DOT
 from notify.alerts.health import (
     LOOKUP_FAILED,
     WORKFLOW_BUFFER_ZONE,
     WORKFLOW_USDKRW,
-    RunCounter,
     expected_runs,
-    weekly_health,
+    last_week_health,
+    recent_weekly_health,
 )
 from notify.common_constants import MA_PERIOD, TZ_KST
-from notify.state.positions import Position
+from notify.data import github_runs
+from notify.data.github_runs import RunCounter
+from notify.utils.config import ENV_GITHUB_REPOSITORY, ENV_GITHUB_TOKEN
 
 # 2026-09-04 는 금요일이다
 FRIDAY = date(2026, 9, 4)
@@ -133,26 +126,18 @@ class _FakeResponse:
 
 
 class TestRunLookupWindow:
-    """실행 이력을 조회하는 구간.
-
-    GitHub 의 `created` 필터는 UTC 기준인데 점검이 다루는 날짜는 KST 다.
-    아침 알림은 07:30 KST 에 도는데 그것이 UTC 로는 전날 밤이라,
-    날짜를 그대로 넘기면 **하루 어긋난 실행**을 세게 된다.
-    """
+    """실행 이력을 조회하는 구간. `created` 필터가 UTC 기준이라 KST 하루를 UTC 구간으로 묻는다."""
 
     def test_day_runs_from_midnight_to_the_last_second(self) -> None:
         """KST 하루가 00:00:00 에서 23:59:59 까지다."""
-        start, end = health.kst_day_bounds(LOOKUP_DAY)
+        start, end = github_runs.kst_day_bounds(LOOKUP_DAY)
 
         assert start == datetime(2026, 9, 10, 0, 0, 0, tzinfo=TZ_KST)
         assert end == datetime(2026, 9, 10, 23, 59, 59, tzinfo=TZ_KST)
 
     def test_morning_alerts_fall_inside_their_kst_day(self) -> None:
-        """아침 알림의 발화 시각이 그 KST 날짜 구간에 든다.
-
-        이것이 이 버그의 본체다. UTC 날짜로 물으면 이 실행이 하루 앞 날짜로 세어진다.
-        """
-        start, end = health.kst_day_bounds(LOOKUP_DAY)
+        """아침 알림의 발화 시각이 그 KST 날짜 구간에 든다. UTC 날짜로 물으면 하루 앞 날짜로 세어진다."""
+        start, end = github_runs.kst_day_bounds(LOOKUP_DAY)
 
         assert start <= BUFFER_ZONE_FIRED_AT <= end
 
@@ -161,8 +146,8 @@ class TestRunLookupWindow:
 
         겹치면 한 실행이 두 번 세지고, 벌어지면 그 사이 실행이 사라진다.
         """
-        _, first_end = health.kst_day_bounds(LOOKUP_DAY)
-        second_start, _ = health.kst_day_bounds(LOOKUP_DAY + timedelta(days=1))
+        _, first_end = github_runs.kst_day_bounds(LOOKUP_DAY)
+        second_start, _ = github_runs.kst_day_bounds(LOOKUP_DAY + timedelta(days=1))
 
         assert first_end + timedelta(seconds=1) == second_start
 
@@ -183,14 +168,66 @@ class TestRunQuery:
             captured["params"] = params
             return _FakeResponse({"total_count": 1})
 
-        monkeypatch.setattr(health.requests, "get", fake_get)
-        total = health.count_success_runs("ingbeen/quant-notify", "TOKEN", WORKFLOW_BUFFER_ZONE, LOOKUP_DAY)
+        monkeypatch.setattr(github_runs.requests, "get", fake_get)
+        total = github_runs.count_success_runs("ingbeen/quant-notify", "TOKEN", WORKFLOW_BUFFER_ZONE, LOOKUP_DAY)
 
         assert total == 1
         assert captured["params"] == {
             "created": "2026-09-09T15:00:00Z..2026-09-10T14:59:59Z",
             "status": "success",
         }
+
+    def test_request_failure_becomes_a_masked_value_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """조회 실패는 `ValueError` 로 올라가 점검 줄이 「이력 조회 실패」로 적는다. 자격증명은 가린다."""
+
+        def fake_get(url: str, *, params: dict[str, str], headers: dict[str, str], timeout: int) -> _FakeResponse:
+            del params, headers, timeout
+            raise requests.ConnectionError(f"failed: {url}?token=SECRET123")
+
+        monkeypatch.setattr(github_runs.requests, "get", fake_get)
+
+        with pytest.raises(ValueError, match="실행 이력 조회") as caught:
+            github_runs.count_success_runs("ingbeen/quant-notify", "TOKEN", WORKFLOW_BUFFER_ZONE, LOOKUP_DAY)
+
+        assert "SECRET123" not in str(caught.value)
+
+    def test_response_without_total_count_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """응답에 실행 수가 없으면 0 으로 치지 않고 멈춘다."""
+
+        def fake_get(url: str, *, params: dict[str, str], headers: dict[str, str], timeout: int) -> _FakeResponse:
+            del url, params, headers, timeout
+            return _FakeResponse({"message": "Not Found"})
+
+        monkeypatch.setattr(github_runs.requests, "get", fake_get)
+
+        with pytest.raises(ValueError, match="total_count"):
+            github_runs.count_success_runs("ingbeen/quant-notify", "TOKEN", WORKFLOW_BUFFER_ZONE, LOOKUP_DAY)
+
+
+class TestRunCounter:
+    """설정에 따라 고르는 계수 함수."""
+
+    def test_counts_through_the_api_when_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """저장소와 토큰이 있으면 그 둘로 실행 이력을 센다."""
+        settings = {ENV_GITHUB_REPOSITORY: "owner/repo", ENV_GITHUB_TOKEN: "TOKEN"}
+        asked: list[tuple[str, str, str, date]] = []
+
+        def fake_count(repository: str, token: str, workflow: str, day: date) -> int:
+            asked.append((repository, token, workflow, day))
+            return 3
+
+        monkeypatch.setattr(github_runs, "read_config", lambda name, required=True: settings[name])
+        monkeypatch.setattr(github_runs, "count_success_runs", fake_count)
+
+        assert github_runs.run_counter()(WORKFLOW_BUFFER_ZONE, LOOKUP_DAY) == 3
+        assert asked == [("owner/repo", "TOKEN", WORKFLOW_BUFFER_ZONE, LOOKUP_DAY)]
+
+    def test_missing_settings_make_every_lookup_fail(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """설정이 없으면 세는 대신 실패한다. 점검 줄은 「이력 조회 실패」가 되고 본 알림은 나간다."""
+        monkeypatch.setattr(github_runs, "read_config", lambda name, required=True: "")
+
+        with pytest.raises(ValueError, match=ENV_GITHUB_REPOSITORY):
+            github_runs.run_counter()(WORKFLOW_BUFFER_ZONE, LOOKUP_DAY)
 
 
 class TestExpectedRuns:
@@ -225,12 +262,7 @@ class TestExpectedRuns:
         assert expected_runs(WORKFLOW_USDKRW, FRIDAY) == 0
 
     def test_unknown_workflow_stops(self) -> None:
-        """모르는 워크플로는 멈춘다. 조용히 0 을 돌려주지 않는다.
-
-        분모가 0 이면 `actual < expected` 가 영원히 거짓이 되어 **덜 돌았을 때의 강조가
-        통째로 꺼진다** — 점검 줄이 존재하는 이유가 사라지는데 화면은 정상으로 보인다.
-        워크플로 이름은 모듈 상수로만 들어오므로 모르는 이름은 **코드 버그**다.
-        """
+        """모르는 워크플로는 멈춘다. 0 을 돌려주면 덜 돌았을 때의 강조가 꺼진다."""
         with pytest.raises(RuntimeError, match="nope.yml"):
             expected_runs("nope.yml", FRIDAY)
 
@@ -239,11 +271,8 @@ class TestWeeklyHealth:
     """지난주 점검 줄."""
 
     def test_sums_over_the_week(self) -> None:
-        """한 주의 예정 횟수를 모두 더한다.
-
-        점검 구간은 토요일까지다. 미국장 알림이 그 날에도 돌기 때문이다.
-        """
-        line = weekly_health(date(2026, 8, 31), SATURDAY, _as_expected)
+        """한 주의 예정 횟수를 모두 더한다. 구간은 버퍼존이 도는 토요일까지다."""
+        line = last_week_health(MONDAY, _as_expected)
 
         assert line.label == "지난주"
         assert line.period == "08-31 (월) ~ 09-05 (토)"
@@ -255,32 +284,82 @@ class TestWeeklyHealth:
         def counter(workflow: str, day: date) -> int:
             return 0 if day == SATURDAY else expected_runs(workflow, day)
 
-        line = weekly_health(date(2026, 8, 31), SATURDAY, counter)
+        line = last_week_health(MONDAY, counter)
 
         assert f"{RED_DOT} <b>버퍼존 4/5</b>" in line.detail
 
-    def test_total_lookup_failure_is_said_once(self) -> None:
-        """전부 실패했으면 같은 말을 되풀이하지 않는다. 본 알림은 그대로 나간다."""
-        line = weekly_health(date(2026, 8, 31), SATURDAY, _raising)
+    def test_lookup_failure_is_said_without_counts(self) -> None:
+        """조회가 실패하면 그 사실만 적는다. 본 알림은 그대로 나간다."""
+        line = last_week_health(MONDAY, _raising)
 
         assert line.detail == f"{RED_DOT} <b>{LOOKUP_FAILED}</b>"
 
-    def test_reversed_period_raises(self) -> None:
-        """시작일이 종료일보다 뒤면 예외다."""
-        with pytest.raises(ValueError):
-            weekly_health(FRIDAY, date(2026, 8, 31), _always(1))
+
+class TestLastWeekIsIndependentOfTheRunDay:
+    """「지난주」가 실행 요일에 흔들리지 않는지.
+
+    주간 알림은 월요일 아침에 돌지만 수동 복구는 그 주 아무 날에나 일어난다 (`docs/DESIGN.md` §7.3).
+    """
+
+    # 08-31 주의 «다음» 주 월요일. 이 주 아무 날에 돌려도 지난주는 08-31 주여야 한다
+    WEEK_AFTER = date(2026, 9, 7)
+
+    @staticmethod
+    def _recording(asked: list[date]) -> RunCounter:
+        """물어본 날짜를 받아 적는 계수 함수를 만든다.
+
+        Args:
+            asked: 날짜가 쌓일 목록.
+
+        Returns:
+            계수 함수.
+        """
+
+        def counter(workflow: str, day: date) -> int:
+            del workflow
+            asked.append(day)
+            return 1
+
+        return counter
+
+    def test_every_run_day_in_the_week_gives_the_same_window(self) -> None:
+        """같은 주 안에서는 어느 날에 돌려도 같은 지난주를 가리킨다.
+
+        **일요일까지 센다.** 주는 `weekday()` 대로 월요일에 시작한다. 일요일을 주의 시작으로 보는
+        관습 때문에 답이 한 주 어긋나 보이기 쉬운 경계다.
+        """
+        periods = {last_week_health(self.WEEK_AFTER + timedelta(days=offset), _always(1)).period for offset in range(7)}
+
+        assert periods == {"08-31 (월) ~ 09-05 (토)"}
+
+    def test_the_window_never_reaches_into_the_future(self) -> None:
+        """구간의 끝(토)이 실행일보다 앞이다. 아직 오지 않은 날을 세지 않는다."""
+        for offset in range(7):
+            today = self.WEEK_AFTER + timedelta(days=offset)
+            asked: list[date] = []
+
+            last_week_health(today, self._recording(asked))
+
+            assert max(asked) < today
+
+    def test_recent_weekly_points_to_this_weeks_monday(self) -> None:
+        """버퍼존이 도는 화 ~ 토에는 그 주 월요일의 주간 실행을 본다."""
+        for offset in range(1, 6):
+            line = recent_weekly_health(self.WEEK_AFTER + timedelta(days=offset), _always(1))
+
+            assert line.period == "09-07 (월)"
 
 
 class TestBufferZoneHealthDates:
     """버퍼존이 점검 줄에 어떤 날짜를 넘기는지 고정한다.
 
-    줄을 따로 부르는 테스트는 **조립하는 자리에서 넘기는 날짜가 틀려도 통과한다.** 이
-    저장소가 실제로 겪은 고장이 「세는 날짜가 어긋난 것」이었으므로, 조립하는 자리에서 다시 못 박는다.
+    줄을 따로 부르는 테스트는 **조립하는 자리에서 넘기는 날짜가 틀려도 통과한다.** 그래서
+    조립하는 자리에서 다시 못 박는다.
     """
 
     @staticmethod
     def _install(monkeypatch: pytest.MonkeyPatch, respond: RunCounter = expected_runs) -> list[tuple[str, date]]:
-        """시세와 보유를 막고, 점검이 무엇을 언제 물었는지 받아 적는다.
+        """시세를 막고, 점검이 무엇을 언제 물었는지 받아 적는다.
 
         Args:
             monkeypatch: pytest 픽스처.
@@ -291,25 +370,18 @@ class TestBufferZoneHealthDates:
         """
         target = RUN_DAY - timedelta(days=1)
         days = [target - timedelta(days=offset) for offset in range(MA_PERIOD - 1, -1, -1)]
-        index = pd.DatetimeIndex([pd.Timestamp(day, tz="America/New_York") for day in days])
-        closes = pd.Series([100.0] * MA_PERIOD, index=index, dtype="float64")
+        closes = pd.Series([100.0] * MA_PERIOD, index=pd.Index(days), dtype="float64")
         asked: list[tuple[str, date]] = []
 
-        def fetch(tickers: Sequence[str], period: str = "1y") -> dict[str, pd.Series]:
-            del period
+        def fetch(tickers: Sequence[str]) -> dict[str, pd.Series]:
             return {ticker: closes for ticker in tickers}
-
-        def no_positions(path: Path) -> list[Position]:
-            del path
-            return []
 
         def counter(workflow: str, day: date) -> int:
             asked.append((workflow, day))
             return respond(workflow, day)
 
         monkeypatch.setattr(cli, "fetch_closes", fetch)
-        monkeypatch.setattr(cli, "load_positions", no_positions)
-        monkeypatch.setattr(cli, "_health_counter", lambda: counter)
+        monkeypatch.setattr(github_runs, "run_counter", lambda: counter)
         return asked
 
     def test_asks_only_for_the_last_weekly_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -381,8 +453,8 @@ class TestWeeklyAlertHealthDates:
         rates = pd.Series([1300.0] * len(days), index=pd.Index(days), dtype="float64")
         asked: list[tuple[str, date]] = []
 
-        def fetch_usdkrw(api_key: str, stat_code: str, item_code: str, start: date, end: date) -> pd.Series:
-            del api_key, stat_code, item_code, start, end
+        def fetch_usdkrw(api_key: str, start: date, end: date) -> pd.Series:
+            del api_key, start, end
             return rates
 
         def no_closes(*args: object, **kwargs: object) -> object:
@@ -396,7 +468,7 @@ class TestWeeklyAlertHealthDates:
         monkeypatch.setattr(cli, "fetch_usdkrw", fetch_usdkrw)
         monkeypatch.setattr(cli, "fetch_closes", no_closes)
         monkeypatch.setattr(cli, "read_config", lambda name, required=True: "KEY")
-        monkeypatch.setattr(cli, "_health_counter", lambda: counter)
+        monkeypatch.setattr(github_runs, "run_counter", lambda: counter)
         return asked
 
     def test_counts_last_week_from_monday_to_saturday(self, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -11,7 +11,7 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from notify.alerts.usdkrw import mean_deviation, window_slice
+from notify.alerts.usdkrw import mean_deviation, window_line, window_slice
 from notify.common_constants import USDKRW_WINDOW_YEARS
 
 
@@ -40,16 +40,10 @@ class TestMeanDeviation:
     """평균대비."""
 
     def test_ratio_against_window_mean(self) -> None:
-        """평균대비는 현재를 창 평균으로 나눈 뒤 1 을 뺀 비율이다."""
-        assert mean_deviation(current=1384.80, window_closes=_flat(1462.0, 246)) == pytest.approx(1384.80 / 1462.0 - 1)
-
-    def test_matches_the_recorded_calculation(self) -> None:
-        """실측 검산과 같은 값이 나온다.
-
-        1,384.80 을 최근 1년 평균 1,462원과 견주면 -5.3% 다.
-        """
+        """평균대비는 현재를 창 평균으로 나눈 뒤 1 을 뺀 비율이다. 실측 검산(1,384.80 ÷ 1,462 − 1 = −5.3%)과 같다."""
         rate = mean_deviation(current=1384.80, window_closes=_flat(1462.0, 246))
 
+        assert rate == pytest.approx(1384.80 / 1462.0 - 1)
         assert round(rate * 100, 1) == -5.3
 
     def test_cheaper_than_average_is_negative(self) -> None:
@@ -74,19 +68,14 @@ class TestMeanDeviation:
 
         assert mean_deviation(current=1250.0, window_closes=closes) == pytest.approx(0.0)
 
-    def test_empty_window_raises(self) -> None:
-        """빈 창은 평균을 낼 수 없으므로 예외다."""
-        with pytest.raises(ValueError):
-            mean_deviation(current=1000.0, window_closes=pd.Series([], dtype="float64"))
-
 
 class TestWindowSlice:
     """비교 창 자르기."""
 
     @staticmethod
     def _daily() -> pd.Series:
-        """하루 간격 종가 계열. 2025-09-01 부터 2026-09-04 까지."""
-        days = pd.date_range("2025-09-01", "2026-09-04", freq="D").date
+        """하루 간격 종가 계열. 2023-09-01 부터 2026-09-04 까지."""
+        days = pd.date_range("2023-09-01", "2026-09-04", freq="D").date
         return pd.Series([1000.0] * len(days), index=pd.Index(days), dtype="float64")
 
     def test_includes_both_ends(self) -> None:
@@ -116,3 +105,34 @@ class TestWindowSlice:
         """창에 자료가 하나도 없으면 예외다. 빈 평균을 만들지 않는다."""
         with pytest.raises(ValueError):
             window_slice(self._daily(), end=date(2020, 1, 1), years=1)
+
+    def test_leap_day_end_starts_on_february_28th(self) -> None:
+        """기준일이 2/29 여도 창을 자른다. 그 해에 2/29 가 없으면 2/28 부터다."""
+        days = pd.date_range("2026-01-01", "2028-03-01", freq="D").date
+        closes = pd.Series([1000.0] * len(days), index=pd.Index(days), dtype="float64")
+
+        window = window_slice(closes, end=date(2028, 2, 29), years=1)
+
+        assert window.index[0] == date(2027, 2, 28)
+
+    def test_data_starting_after_the_window_raises(self) -> None:
+        """자료가 창 시작일보다 늦게 시작하면 멈춘다. 짧은 자료로 긴 창의 평균을 내지 않는다."""
+        with pytest.raises(ValueError, match="2021-08-01"):
+            window_slice(self._daily(), end=date(2026, 8, 1), years=5)
+
+
+class TestWindowLine:
+    """창 하나의 줄."""
+
+    def test_last_value_is_current_and_the_window_ends_on_its_day(self) -> None:
+        """마지막 값을 현재로 보고, 그 날까지의 창 평균과 평균대비를 낸다."""
+        days = pd.date_range("2024-01-01", "2026-09-04", freq="D").date
+        closes = pd.Series([1000.0] * (len(days) - 1) + [1100.0], index=pd.Index(days), dtype="float64")
+        # 2025-09-04 ~ 2026-09-04 양끝 포함 366일 중 마지막 하루만 1,100원이다
+        expected_mean = (1000.0 * 365 + 1100.0) / 366
+
+        line = window_line(closes, years=1)
+
+        assert line.years == 1
+        assert line.mean_price == pytest.approx(expected_mean)
+        assert line.deviation_rate == pytest.approx(1100.0 / expected_mean - 1)

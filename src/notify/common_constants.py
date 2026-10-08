@@ -1,7 +1,6 @@
-"""알림 전반이 공유하는 상수.
+"""알림이 쓰는 고정값.
 
-티커·기간·여유 폭 같은 값을 한곳에 모은다. 계산 코드에 숫자를 흩어 두면
-같은 값이 여러 곳에서 갈라진다.
+경로 · 알림 이름과, 다른 저장소의 매매 규칙에서 옮겨 적은 값(티커 · 기간 · 두 선 · 창)을 한곳에 둔다.
 
 비율은 모두 0~1 사이 소수다 (0.01 = 1%).
 """
@@ -18,6 +17,10 @@ POSITIONS_PATH = STATE_DIR / "positions.toml"
 
 # 로컬 자격증명. git 에서 제외돼 있고 워크플로에는 존재하지 않는다 (utils/config.py)
 ENV_FILE_PATH = PROJECT_ROOT / ".env"
+
+# 알림 이름. 워크플로 파일 이름은 여기에 `.yml` 을 붙인 것이다
+ALERT_BUFFER_ZONE = "buffer_zone"
+ALERT_USDKRW = "usdkrw"
 
 # 이동평균 근접도를 보는 티커
 TICKER_SPY = "SPY"
@@ -38,11 +41,6 @@ SELL_BUFFER_ZONE_RATE = 0.05  # 매도선 비율 (0.05 = 이동평균의 5% 아�
 
 # 원달러를 견주는 창 (년)
 USDKRW_WINDOW_YEARS: tuple[int, ...] = (1, 3, 5, 10)
-
-# ECOS 원달러 계열. 실측으로 확정했다 — 근거는 docs/research/데이터소스_실측.md
-# 731Y001/0000001(매매기준율)은 다른 계열이다. 값이 하루 1~2원씩 어긋난다
-ECOS_USDKRW_STAT_CODE = "731Y003"
-ECOS_USDKRW_ITEM_CODE = "0000003"
 
 # 타임존
 TZ_KST = ZoneInfo("Asia/Seoul")

@@ -1,24 +1,19 @@
-"""판정이 읽는 값이 그 날짜의 것인지 고정한다.
+"""버퍼존이 읽는 종가가 그 날짜의 확정 종가인지 고정한다.
 
-yfinance 는 거래일 행을 주면서 **종가만 비워** 보내는 일이 있다. 2026-09-09 오전에
-SPY·QQQ·GLD·TLT 넷 모두의 09-08 행이 그랬고, 약 1시간 40분 뒤 값이 채워졌다.
-
-빈 값은 `_extract_close` 가 떨구므로 **자취가 남지 않는다.** 남은 계열의 끝을 그대로
-쓰면 하루 전 종가로 판정하게 되는데, 알림 형태로는 정상으로 보여 알아차릴 수 없다.
-
-그래서 위치가 아니라 **날짜로** 고르고, 없으면 멈춘다 (`docs/DESIGN.md` 7.4절
-「보간하지 않습니다 — 값이 없으면 없다고 하고 멈춥니다」). 이 파일이 그 규칙을 지킨다.
+위치가 아니라 날짜로 고르고, 없거나 아직 마감 전이면 멈춘다 (`docs/DESIGN.md` §7.4).
 """
 
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from notify import cli
 from notify.common_constants import TZ_KST
+from notify.data import github_runs
 from notify.data.yfinance_client import closes_through
 
 QQQ = "QQQ"
@@ -28,24 +23,18 @@ FRI = date(2026, 9, 4)
 TUE = date(2026, 9, 8)
 WED = date(2026, 9, 9)
 
-NEW_YORK = "America/New_York"
 
-
-def _series(days: list[date], values: list[float], tz: str = NEW_YORK) -> pd.Series:
-    """`Ticker.history` 가 남기는 모양의 종가 계열을 만든다.
-
-    인덱스에 **거래소 현지 tz** 가 붙는다. 날짜 비교가 여기서 어긋나면 값이 조용히 틀린다.
+def _series(days: list[date], values: list[float]) -> pd.Series:
+    """`fetch_closes` 가 내는 모양의 종가 계열을 만든다. 거래소 현지 날짜가 인덱스다.
 
     Args:
         days: 날짜들.
         values: 종가들.
-        tz: 거래소 시간대.
 
     Returns:
         종가 계열.
     """
-    index = pd.DatetimeIndex([pd.Timestamp(day, tz=tz) for day in days])
-    return pd.Series(values, index=index, dtype="float64")
+    return pd.Series(values, index=pd.Index(days), dtype="float64")
 
 
 def _at(day: date, hour: int, minute: int) -> datetime:
@@ -74,8 +63,7 @@ def _install_closes(monkeypatch: pytest.MonkeyPatch, closes: dict[str, pd.Series
     """
     calls: list[list[str]] = []
 
-    def fake(tickers: list[str], period: str = "1y") -> dict[str, pd.Series]:
-        del period
+    def fake(tickers: list[str]) -> dict[str, pd.Series]:
         calls.append(list(tickers))
         return {ticker: closes[ticker] for ticker in tickers}
 
@@ -84,7 +72,7 @@ def _install_closes(monkeypatch: pytest.MonkeyPatch, closes: dict[str, pd.Series
 
 
 def _forbid_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    """휴장이면 조회 자체를 하지 않아야 한다.
+    """시세 조회를 하면 실패하게 만든다. 조회 전에 끝나야 하는 경우에 건다.
 
     Args:
         monkeypatch: pytest 픽스처.
@@ -92,22 +80,33 @@ def _forbid_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def never(*args: object, **kwargs: object) -> object:
         del args, kwargs
-        raise AssertionError("휴장일에는 시세를 받지 않는다")
+        raise AssertionError("이 경우에는 시세를 받지 않는다")
 
     monkeypatch.setattr(cli, "fetch_closes", never)
 
 
-class TestClosesThroughFailure:
-    """그 날짜의 종가가 없을 때.
+class TestClosesThrough:
+    """그 날짜까지 자르기."""
 
-    날짜로 자르는 정상 경로는 `test_weekly_window.TestClosesThrough` 가 고정한다.
-    """
+    def test_cuts_off_rows_after_that_day(self) -> None:
+        """뒤에 붙어 온 행을 잘라낸다. 이동평균 창이 그쪽으로 밀리지 않게 한다."""
+        closes = _series([date(2026, 9, 3), FRI, TUE], [717.67, 718.96, 718.36])
+
+        through = closes_through(closes, FRI, QQQ)
+
+        assert len(through) == 2
+        assert float(through.iloc[-1]) == 718.96
+
+    def test_keeps_everything_when_that_day_is_last(self) -> None:
+        """자를 것이 없으면 그대로 돌려준다."""
+        closes = _series([date(2026, 9, 3), FRI], [717.67, 718.96])
+
+        assert len(closes_through(closes, FRI, QQQ)) == 2
 
     def test_message_names_the_ticker_and_both_days(self) -> None:
-        """실패 문구가 종목·요청 날짜·마지막 종가일을 담는다.
+        """그 날짜가 없으면 멈추고, 실패 문구가 종목 · 요청 날짜 · 마지막 종가일을 담는다.
 
-        이 문구는 텔레그램 실패 알림에 그대로 실린다. 얼마나 낡았는지가 담겨야
-        사용자가 다시 돌릴지 정할 수 있다 (`docs/DESIGN.md` 7.4절).
+        얼마나 낡았는지가 담겨야 사용자가 다시 돌릴지 정할 수 있다.
         """
         closes = _series([FRI], [718.96])
 
@@ -158,7 +157,7 @@ class TestBufferZoneNeedsTheTargetClose:
             알림 문구.
         """
         _install_closes(monkeypatch, closes)
-        monkeypatch.setattr(cli, "_health_counter", lambda: (lambda workflow, day: 1))
+        monkeypatch.setattr(github_runs, "run_counter", lambda: (lambda workflow, day: 1))
         return cli.run_buffer_zone(_at(WED, 7, 30))
 
     def test_uses_the_target_close_not_the_last_row(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,12 +173,7 @@ class TestBufferZoneNeedsTheTargetClose:
         assert message.count("+1.99%") == len(cli.BUFFER_ZONE_TICKERS)
 
     def test_moving_average_ignores_rows_after_the_target(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """이동평균 창도 target 에서 끊는다.
-
-        수동 재실행을 미국 장중(22:30~05:00 KST)에 하면 당일 미확정 봉이 섞여 온다.
-        그것이 200일 창에 들어가면 근접도가 0.1%p 남짓 어긋나는데, 소수 둘째 자리까지
-        내므로 화면에 그대로 보인다.
-        """
+        """이동평균 창도 target 에서 끊는다. target 뒤에 붙어 온 미확정 봉을 창에 넣지 않는다."""
         closes = {ticker: self._long_series(130.0) for ticker in cli.BUFFER_ZONE_TICKERS}
         cut = {ticker: series.iloc[:-1] for ticker, series in closes.items()}
 
@@ -197,8 +191,32 @@ class TestBufferZoneNeedsTheTargetClose:
         with pytest.raises(ValueError):
             self._run(monkeypatch, closes)
 
+    def test_holdings_are_weighted_by_the_target_close(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """보유 종목도 함께 받아 target 종가의 평가액 비중으로 적는다. 버퍼존 티커와 겹치면 한 번만 받는다."""
+        body = '[[positions]]\nticker = "QLD"\nquantity = 2\n\n[[positions]]\nticker = "GLD"\nquantity = 1\n'
+        (tmp_path / "positions.toml").write_text(body, encoding="utf-8")
+        closes = {ticker: self._long_series(130.0) for ticker in (*cli.BUFFER_ZONE_TICKERS, "QLD")}
+        calls = _install_closes(monkeypatch, closes)
+        monkeypatch.setattr(github_runs, "run_counter", lambda: (lambda workflow, day: 1))
+
+        message = cli.run_buffer_zone(_at(WED, 7, 30))
+
+        assert calls == [[*cli.BUFFER_ZONE_TICKERS, "QLD"]]
+        assert message is not None
+        assert "<b>보유</b>\nQLD 2주 · 66.7%\nGLD 1주 · 33.3%" in message
+
     def test_holiday_stays_silent_without_fetching(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """전날이 미국 휴장이면 조용히 끝낸다."""
         _forbid_fetch(monkeypatch)
 
         assert cli.run_buffer_zone(_at(TUE, 7, 30)) is None
+
+    def test_stops_before_the_us_close_without_fetching(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """미국장이 아직 마감 전이면 조회하지 않고 멈춘다.
+
+        KST 01:00 의 target(어제)은 진행 중인 미국 세션이라, 받은 일봉의 그날 값은 확정 종가가 아니다.
+        """
+        _forbid_fetch(monkeypatch)
+
+        with pytest.raises(ValueError, match="마감"):
+            cli.run_buffer_zone(_at(date(2026, 9, 10), 1, 0))

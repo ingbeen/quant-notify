@@ -1,8 +1,4 @@
-"""이동평균 근접도와 보유 비중을 계산한다.
-
-이동평균은 최근 구간의 종가를 더해 개수로 나눈 값이라, 최근 1년치만 있으면
-누가 계산해도 같은 값이 나온다.
-"""
+"""이동평균 근접도와 보유 비중을 계산하고 버퍼존 알림 문구를 만든다."""
 
 from __future__ import annotations
 
@@ -12,7 +8,7 @@ from datetime import datetime
 
 import pandas as pd
 
-from notify.alerts.formatting import bold, format_day, format_rate, format_weight
+from notify.alerts.formatting import bold, format_rate, format_sent_at, format_weight
 from notify.alerts.health import HealthLine
 from notify.common_constants import (
     BUFFER_ZONE_SIGNAL_TICKERS,
@@ -22,15 +18,14 @@ from notify.common_constants import (
 )
 
 
-def sma(closes: pd.Series, period: int = MA_PERIOD) -> float:
-    """단순이동평균을 낸다.
+def sma(closes: pd.Series) -> float:
+    """최근 `MA_PERIOD` 거래일의 단순이동평균을 낸다.
 
-    기간을 못 채우면 값을 만들지 않는다. 짧은 창으로 대신 계산하면 백테스트와
-    다른 값이 나오는데, 알림 형태로는 정상으로 보인다.
+    기간을 못 채우면 값을 만들지 않는다. 짧은 창으로 대신 계산하면 백테스트와 다른 값이
+    정상처럼 나간다.
 
     Args:
         closes: 종가 계열. 오래된 값이 앞에 온다.
-        period: 기간. 거래일 수.
 
     Returns:
         최근 기간의 단순이동평균.
@@ -38,18 +33,14 @@ def sma(closes: pd.Series, period: int = MA_PERIOD) -> float:
     Raises:
         ValueError: 계열이 기간보다 짧을 때.
     """
-    if period <= 0:
-        raise ValueError(f"이동평균 기간은 1 이상이어야 합니다. 지금 값: {period}")
-    if len(closes) < period:
-        raise ValueError(f"이동평균을 내려면 종가가 {period}개 있어야 합니다. 지금 {len(closes)}개입니다.")
+    if len(closes) < MA_PERIOD:
+        raise ValueError(f"이동평균을 내려면 종가가 {MA_PERIOD}개 있어야 합니다. 지금 {len(closes)}개입니다.")
 
-    return float(closes.tail(period).mean())
+    return float(closes.tail(MA_PERIOD).mean())
 
 
 def ma_proximity(close: float, ma: float) -> float:
-    """이동평균 근접도를 낸다.
-
-    평균선 위면 양수, 아래면 음수다.
+    """이동평균 근접도를 낸다. 평균선 위면 양수, 아래면 음수다.
 
     Args:
         close: 종가.
@@ -68,27 +59,20 @@ def ma_proximity(close: float, ma: float) -> float:
 
 
 def position_weights(quantities: Mapping[str, int], prices: Mapping[str, float]) -> dict[str, float]:
-    """보유 비중을 낸다.
-
-    비중은 평가액 비율이다. 수량만으로 내면 주당 가격이 달라 뜻 없는 숫자가 나온다.
-    평가액은 계산에만 쓰고 알림에 표시하지 않는다.
+    """보유 비중을 낸다. 평가액 비율이다 (`docs/DESIGN.md` §4.2).
 
     Args:
         quantities: 종목별 보유 수량.
-        prices: 종목별 현재가.
+        prices: 종목별 현재가. 보유 종목이 모두 들어 있어야 한다.
 
     Returns:
         종목별 비중. 비율. 보유가 없으면 빈 결과.
 
     Raises:
-        ValueError: 보유 종목의 가격이 없거나 평가액 합이 0 일 때.
+        ValueError: 평가액 합이 0 일 때.
     """
     if not quantities:
         return {}
-
-    missing = [ticker for ticker in quantities if ticker not in prices]
-    if missing:
-        raise ValueError(f"보유 종목의 가격이 없습니다: {', '.join(missing)}. 시세 조회를 확인하세요.")
 
     valuations = {ticker: quantity * prices[ticker] for ticker, quantity in quantities.items()}
     total = sum(valuations.values())
@@ -118,9 +102,8 @@ class HoldingLine:
 def _proximity_text(line: ProximityLine) -> str:
     """근접도를 표시할 말로 바꾼다.
 
-    매수선·매도선으로 매매하는 종목은 두 선 사이일 때만 수치를 내고, 밖이면 어느 쪽인지만
-    적는다. 매매가 선을 넘었는지로만 갈려 선에서 먼 날의 수치는 판단에 쓰이지 않는다.
-    정확히 선 위인 날은 선 안이다 — quant 판정이 등호를 넣지 않는다 (docs/DESIGN.md 4.5 절).
+    두 선으로 매매하는 종목은 두 선 사이일 때만 수치를 내고 밖이면 위치를 적는다.
+    정확히 선 위인 날은 선 안이다 (`docs/DESIGN.md` §4.3).
 
     Args:
         line: 한 종목의 근접도.
@@ -137,75 +120,35 @@ def _proximity_text(line: ProximityLine) -> str:
     return format_rate(rate)
 
 
-def _proximity_rows(proximities: Sequence[ProximityLine]) -> list[str]:
-    """근접도 줄을 만든다. 한 줄에 한 종목씩 쌓는다.
-
-    Args:
-        proximities: 종목별 근접도.
-
-    Returns:
-        줄 목록.
-    """
-    return [f"{line.ticker} {_proximity_text(line)}" for line in proximities]
-
-
-def _holding_rows(holdings: Sequence[HoldingLine]) -> list[str]:
-    """보유 줄을 만든다.
-
-    Args:
-        holdings: 보유 종목.
-
-    Returns:
-        줄 목록.
-    """
-    return [f"{line.ticker} {line.quantity:,}주 · {format_weight(line.weight_ratio)}" for line in holdings]
-
-
-def _health_rows(health: Sequence[HealthLine]) -> list[str]:
-    """점검 줄을 만든다.
-
-    Args:
-        health: 점검 항목.
-
-    Returns:
-        줄 목록.
-    """
-    return [f"{line.label} {line.period} · {line.detail}" for line in health]
-
-
 def render(
     sent_at: datetime,
     proximities: Sequence[ProximityLine],
     holdings: Sequence[HoldingLine],
-    health: Sequence[HealthLine],
+    health: HealthLine,
 ) -> str:
-    """이동평균 알림 문구를 만든다.
-
-    보유가 비어도 발송한다. 그 블록을 통째로 빼고 나머지는 그대로 낸다.
+    """버퍼존 알림 문구를 만든다. 보유가 비면 그 블록을 뺀다.
 
     Args:
         sent_at: 발송 시각.
         proximities: 종목별 이동평균 근접도.
         holdings: 보유 종목.
-        health: 점검 항목.
+        health: 점검 줄.
 
     Returns:
         보낼 문구.
-
-    Raises:
-        ValueError: 근접도가 하나도 없을 때.
     """
-    if not proximities:
-        raise ValueError("이동평균 근접도가 비어 있어 알림을 만들 수 없습니다.")
-
     rows = [
-        f"{bold('QBT')} · {format_day(sent_at.date())} {sent_at:%H:%M}",
+        f"{bold('QBT')} · {format_sent_at(sent_at)}",
         "",
         bold("MA 근접도"),
-        *_proximity_rows(proximities),
+        *(f"{line.ticker} {_proximity_text(line)}" for line in proximities),
     ]
     if holdings:
-        rows += ["", bold("보유"), *_holding_rows(holdings)]
-    rows += ["", bold("점검"), *_health_rows(health)]
+        rows += [
+            "",
+            bold("보유"),
+            *(f"{line.ticker} {line.quantity:,}주 · {format_weight(line.weight_ratio)}" for line in holdings),
+        ]
+    rows += ["", bold("점검"), f"{health.label} {health.period} · {health.detail}"]
 
     return "\n".join(rows)

@@ -1,15 +1,8 @@
-"""yfinance 로 일봉 종가를 받는다.
+"""yfinance 로 일봉 조정 종가를 받는다.
 
-**조정 종가를 쓴다.** 배당과 분할을 반영한 값이라야 백테스트가 낸 이동평균과 같은
-값이 나온다. 원시 종가로 계산하면 200일 이동평균이 0.1% 남짓 어긋나는데,
-근접도를 소수 둘째 자리까지 내므로 그 차이가 화면에 그대로 보인다.
-
-기본값에 기대지 않고 `auto_adjust` 를 명시한다. 라이브러리 판이 바뀌면 기본값도 바뀐다.
-
-**`yf.download` 을 쓰지 않는다.** 그것은 종목별 예외를 삼키고 빈 프레임을 돌려주므로,
-조회가 왜 실패했는지가 실패 알림에서 사라진다 — 조회 한도에 걸린 것인지 종목이
-없어진 것인지 가릴 수 없으면 다시 돌릴지를 정할 수 없다. `Ticker.history` 는
-`raise_errors` 를 주면 예외를 그대로 올린다 (`docs/research/데이터소스_실측.md`).
+조정 종가를 쓰고 `auto_adjust` 를 명시한다 — 원시 종가로 내면 이동평균이 백테스트와 어긋난다.
+`yf.download` 대신 `Ticker.history(raise_errors=True)` 를 쓴다 — 앞의 것은 종목별 예외를 삼켜
+실패 알림에서 원인이 사라진다 (`docs/research/데이터소스_실측.md` §2).
 """
 
 from __future__ import annotations
@@ -24,27 +17,22 @@ from notify.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 받아올 기간. 200일 이동평균에 필요한 거래일보다 넉넉하다
-DEFAULT_PERIOD = "1y"
-
-# 일봉 간격
-DAILY_INTERVAL = "1d"
+# 받아올 기간과 봉 간격. 1년이면 200일 이동평균에 넉넉하다
+_PERIOD = "1y"
+_INTERVAL = "1d"
 
 # 응답에서 읽을 컬럼
 _CLOSE_COLUMN = "Close"
 
 
-def _history(ticker: str, period: str, interval: str) -> pd.DataFrame:
+def _history(ticker: str) -> pd.DataFrame:
     """한 종목의 시세를 받는다.
 
-    **실패하면 원인을 담아 올린다.** 예외 클래스명을 함께 적는 것은 조회 한도
-    (`YFRateLimitError`)와 종목 소멸(`YFPricesMissingError`)이 대응이 다르기 때문이다.
-    앞은 다시 돌리면 되고 뒤는 종목을 고쳐야 한다.
+    예외 클래스명을 함께 싣는다 — 조회 한도(`YFRateLimitError`)는 다시 돌리면 되고
+    종목 소멸(`YFPricesMissingError`)은 종목을 고쳐야 한다.
 
     Args:
         ticker: 받을 종목.
-        period: 기간 문자열 (예: 1y).
-        interval: 봉 간격 (예: 1d).
 
     Returns:
         시세 프레임.
@@ -53,20 +41,22 @@ def _history(ticker: str, period: str, interval: str) -> pd.DataFrame:
         ValueError: 조회가 실패했을 때.
     """
     try:
-        return yf.Ticker(ticker).history(period=period, interval=interval, auto_adjust=True, raise_errors=True)
+        return yf.Ticker(ticker).history(period=_PERIOD, interval=_INTERVAL, auto_adjust=True, raise_errors=True)
     except Exception as exc:
         raise ValueError(f"[{ticker}] 시세 조회에 실패했습니다: {type(exc).__name__}: {exc}") from None
 
 
 def _extract_close(frame: pd.DataFrame, ticker: str) -> pd.Series:
-    """응답에서 종가 계열을 꺼낸다.
+    """응답에서 종가를 꺼내고 인덱스를 거래소 현지 날짜로 바꾼다.
+
+    빈 종가는 버린다. 그날 행이 자취 없이 사라지므로 판정은 날짜로 값을 집는다 (`closes_through`).
 
     Args:
-        frame: 시세 프레임.
+        frame: 시세 프레임. 인덱스에 거래소 현지 시간대가 붙어 있다.
         ticker: 꺼낼 종목. 문구에 쓴다.
 
     Returns:
-        종가 계열.
+        날짜를 인덱스로 갖는 종가 계열.
 
     Raises:
         ValueError: 종가가 응답에 없을 때.
@@ -74,36 +64,34 @@ def _extract_close(frame: pd.DataFrame, ticker: str) -> pd.Series:
     if _CLOSE_COLUMN not in frame.columns:
         raise ValueError(f"[{ticker}] 종가가 응답에 없습니다.")
 
-    return frame[_CLOSE_COLUMN].dropna().astype("float64")
+    closes = frame[_CLOSE_COLUMN].dropna()
+    days = pd.DatetimeIndex(closes.index).date
+    return pd.Series(closes.to_numpy(dtype="float64"), index=pd.Index(days), dtype="float64")
 
 
-def fetch_closes(tickers: Sequence[str], period: str = DEFAULT_PERIOD) -> dict[str, pd.Series]:
+def fetch_closes(tickers: Sequence[str]) -> dict[str, pd.Series]:
     """종목별 조정 종가 계열을 받는다.
 
-    한 종목이라도 비면 전체를 실패로 돌린다. 반쪽 결과로 알림을 내면 읽는 사람이
-    무엇이 빠졌는지 알아차리기 어렵다.
-
-    **첫 실패에서 멈춘다.** 실제로 겪는 실패는 조회 한도이고, 그 상태에서 남은 종목을
-    부르면 같은 실패를 더 만들 뿐이다.
+    한 종목이라도 실패하면 전체를 실패로 돌린다 (`docs/DESIGN.md` §7.4). **첫 실패에서 멈춘다** —
+    조회 한도에 걸린 상태에서 남은 종목을 불러도 같은 실패만 늘어난다.
 
     Args:
         tickers: 받을 종목.
-        period: 기간 문자열 (예: 1y).
 
     Returns:
-        종목별 종가 계열. 날짜를 인덱스로 갖는다.
+        종목별 종가 계열. 거래소 현지 날짜를 인덱스로 갖는다.
 
     Raises:
-        ValueError: 종목 목록이 비었거나, 조회가 실패했거나, 값이 빈 종목이 있을 때.
+        ValueError: 조회가 실패했거나, 값이 빈 종목이나 0 이하 종가가 있을 때.
     """
-    if not tickers:
-        raise ValueError("받을 종목이 없습니다.")
-
     closes: dict[str, pd.Series] = {}
     for ticker in tickers:
-        series = _extract_close(_history(ticker, period, DAILY_INTERVAL), ticker)
+        series = _extract_close(_history(ticker), ticker)
         if series.empty:
             raise ValueError(f"[{ticker}] 시세가 비어 있습니다. 조회를 다시 실행하세요.")
+        if (series <= 0).any():
+            first = series.index[series <= 0][0]
+            raise ValueError(f"[{ticker}] 0 이하 종가가 있습니다 ({first}). 값을 채우지 않고 멈춥니다.")
         closes[ticker] = series
 
     counts = ", ".join(f"{ticker} {len(series)}행" for ticker, series in closes.items())
@@ -111,46 +99,14 @@ def fetch_closes(tickers: Sequence[str], period: str = DEFAULT_PERIOD) -> dict[s
     return closes
 
 
-def _index_date(stamp: object) -> date:
-    """시세 인덱스 값을 날짜로 바꾼다.
-
-    Args:
-        stamp: 인덱스 값.
-
-    Returns:
-        날짜.
-
-    Raises:
-        RuntimeError: 인덱스가 날짜도 시각도 아닐 때.
-    """
-    to_date = getattr(stamp, "date", None)
-    if callable(to_date):
-        converted = to_date()
-        if isinstance(converted, date):
-            return converted
-    if isinstance(stamp, date):
-        return stamp
-
-    raise RuntimeError(f"내부 불변조건 위반: 시세 인덱스가 날짜가 아닙니다: {stamp!r}")
-
-
 def closes_through(closes: pd.Series, day: date, ticker: str) -> pd.Series:
     """그 날짜까지의 종가만 남긴다.
 
-    **위치가 아니라 날짜로 자른다.** 이유가 둘이다.
-
-    하나는 yfinance 가 거래일 행을 주면서 종가만 비워 보내는 일이 있다는 것이다
-    (2026-09-09 오전 실측). 빈 값은 `_extract_close` 가 떨궈 자취가 남지 않으므로,
-    남은 계열의 끝을 그대로 쓰면 하루 전 종가로 판정하게 된다.
-
-    다른 하나는 장중에 일봉을 받으면 **당일 미확정 봉이 마지막에 섞여 온다**는 것이다.
-    그것이 이동평균 창에 들어가면 근접도가 어긋난다.
-
-    둘 다 값을 조용히 틀리게 하는데 알림 형태로는 정상으로 보인다.
-    인덱스에는 거래소 현지 시간대가 붙어 오므로 날짜로 바꿔 견준다.
+    **위치가 아니라 날짜로 자른다.** 빈 종가가 떨어져 나간 날은 계열의 끝이 하루 전 값이 되고,
+    장중에 받으면 당일 미확정 봉이 끝에 온다 (`docs/DESIGN.md` §7.4).
 
     Args:
-        closes: 종가 계열. 날짜나 시각을 인덱스로 갖는다.
+        closes: 날짜를 인덱스로 갖는 종가 계열.
         day: 마지막으로 담을 날짜.
         ticker: 종목. 실패 문구에 쓴다.
 
@@ -160,9 +116,9 @@ def closes_through(closes: pd.Series, day: date, ticker: str) -> pd.Series:
     Raises:
         ValueError: 그 날짜의 종가가 없을 때.
     """
-    through = closes[[_index_date(stamp) <= day for stamp in closes.index]]
-    if through.empty or _index_date(through.index[-1]) != day:
-        latest = f"마지막 종가일 {_index_date(closes.index[-1])}" if not closes.empty else "받은 종가 없음"
+    through = closes[closes.index <= day]
+    if through.empty or through.index[-1] != day:
+        latest = f"마지막 종가일 {closes.index[-1]}" if not closes.empty else "받은 종가 없음"
         raise ValueError(f"[{ticker}] {day} 종가를 받지 못했습니다 ({latest}). 조회를 다시 실행하세요.")
 
     return through

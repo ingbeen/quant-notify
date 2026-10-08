@@ -3,6 +3,7 @@
 > 이 파일은 실행 명령어의 **단일 SoT(Source of Truth)** 입니다.
 > README.md · CLAUDE.md 등 다른 문서에는 실행 명령어를 기재하지 않으며, 필요 시 이 문서를 참조합니다.
 > 설치처럼 한 번만 쓰는 일회성 명령어는 기재하지 않습니다. **평상시 반복 실행하는 명령어만** 관리합니다.
+> cron-job.org 잡 설정과 PAT 발급(한 번 하는 설정)은 [README](../README.md) 에 있습니다.
 
 ---
 
@@ -20,7 +21,7 @@ poetry run python validate_project.py --only-tests
 # 커버리지 포함 테스트
 poetry run python validate_project.py --cov
 
-# 포맷 자동 적용 (마지막 Phase에서만)
+# 포맷 자동 적용
 poetry run black .
 ```
 
@@ -52,55 +53,11 @@ poetry run python -m notify buffer_zone
 > **휴장이면 조용히 끝납니다.** 이동평균 알림은 한국 기준 어제가 미국 거래일이
 > 아니면 볼 새 종가가 없어 그대로 종료합니다.
 
+> **한국 자정 뒤 미국 마감 전에 버퍼존을 돌리면 실패로 멈춥니다.** 판정할 종가가 아직
+> 확정 전이기 때문입니다 ([DESIGN.md](DESIGN.md) §7.4). 마감 뒤에 다시 돌립니다.
+
 > `점검` 줄은 `GITHUB_REPOSITORY` 와 `GITHUB_TOKEN` 이 있어야 채워집니다. 로컬에서는
 > 보통 없으므로 **`이력 조회 실패` 로 나오고, 본문은 그대로 나옵니다.**
-
----
-
-## cron-job.org 정시 트리거 설정
-
-워크플로는 `workflow_dispatch` 뿐이라 **누가 불러주지 않으면 돌지 않습니다.**
-cron-job.org 에 아래 잡 두 개를 만듭니다. 요일 근거는 [DESIGN.md](DESIGN.md) 6.4 절에 있습니다.
-
-**공통 설정** — 잡마다 URL 의 워크플로 파일명만 다릅니다.
-
-```
-Method    POST
-URL       https://api.github.com/repos/ingbeen/quant-notify/actions/workflows/<파일명>/dispatches
-Headers   Authorization: Bearer <PAT>
-          Accept: application/vnd.github+json
-          X-GitHub-Api-Version: 2026-03-10
-          Content-Type: application/json
-Body      {"ref":"main"}
-Timezone  Asia/Seoul
-```
-
-**URL 끝의 `/dispatches` 가 「실행시켜라」입니다.** 빼면 워크플로 정보를 조회하는 주소가 됩니다.
-
-| 잡 | 크론탭 | 시각 (KST) | 워크플로 파일 |
-| --- | --- | --- | --- |
-| 버퍼존 | `30 7 * * 2-6` | 화~토 07:30 | `buffer_zone.yml` |
-| 주간 | `30 7 * * 1` | 월 07:30 | `usdkrw.yml` |
-
-**API 버전은 `2026-03-10` 을 씁니다.** `2022-11-28` 은 2026-03-10 부로 deprecated 되었고
-2028-03-10 에 끊깁니다. 새 버전은 응답도 낫습니다 — `204 No Content` 대신 **`200 OK` 와 함께
-`workflow_run_id`·`html_url` 을 돌려주어** 방금 만든 실행을 바로 찾을 수 있습니다.
-
-**실패 알림 이메일을 켭니다.** PAT 가 만료되거나 무효가 되면 cron 이 401 을 받고 워크플로가
-아예 돌지 않는데, **알림이 안 오니 점검 줄도 오지 않습니다.** 이 메일이 그것을 잡는 유일한
-장치입니다. cron-job.org 는 15회 연속 실패하면 잡을 끄고 알려줍니다.
-
-### PAT 발급
-
-https://github.com/settings/personal-access-tokens/new 에서 만듭니다.
-
-| 항목 | 값 |
-| --- | --- |
-| Expiration | `No expiration` — 만료는 위 「조용한 죽음」을 부릅니다 |
-| Repository access | `Only select repositories` → `ingbeen/quant-notify` |
-| Permissions | **Actions: Read and write** 하나만. dispatch(write)와 점검 줄의 이력 조회(read)를 겸합니다 |
-
-토큰은 **생성 직후 한 번만** 보입니다. cron-job.org 헤더와 로컬 `.env` 의 `GITHUB_TOKEN` 에 넣습니다.
 
 ---
 
@@ -110,9 +67,8 @@ https://github.com/settings/personal-access-tokens/new 에서 만듭니다.
 
 GitHub 웹 → **Actions** → 워크플로 선택 → **Run workflow**
 
-> **주간 알림은 월요일이 아닌 날에 돌려도 됩니다.** 점검 줄의 「지난주」는 실행 요일이 아니라
-> 달력이 정하므로, 화요일에 복구 실행해도 직전 주를 그대로 셉니다.
-> 근거는 [DESIGN.md](DESIGN.md) 7.3 절에 있습니다.
+> **주간 알림은 월요일이 아닌 날에 돌려도 됩니다** — 점검 줄의 「지난주」는 실행 요일이 아니라
+> 달력이 정합니다 ([DESIGN.md](DESIGN.md) §7.3).
 
 ### 보내지 않고 확인하기 (`dry_run`)
 
@@ -158,5 +114,4 @@ gh run list --status=failure --limit=10
 > 🔴 **`--created=2026-09-04` 같은 날짜 하나로 묻지 마세요. 그 필터는 UTC 기준입니다.**
 > 아침 알림(버퍼존 07:30 · 주간 월 07:30)은 UTC 로 **전날 22:30**
 > 이라 하루 어긋난 결과가 나오고, **에러는 나지 않습니다.** 위 예시의 `전날 15:00:00Z..당일 14:59:59Z` 가
-> KST 하루입니다. 근거는 [DESIGN.md](DESIGN.md) 7.3 절과
-> `research/데이터소스_실측.md` §7 에 있습니다.
+> KST 하루입니다. 근거는 [DESIGN.md](DESIGN.md) §7.3 에 있습니다.

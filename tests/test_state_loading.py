@@ -101,3 +101,37 @@ class TestPositionsLoading:
 
         with pytest.raises(ValueError):
             load_positions(_write(tmp_path, "positions.toml", body))
+
+    def test_unknown_table_name_raises(self, tmp_path: Path) -> None:
+        """표 이름을 잘못 쓰면 멈춘다. 그대로 두면 빈 보유로 읽혀 보유 블록이 조용히 사라진다."""
+        body = '[[position]]\nticker = "QLD"\nquantity = 200\n'
+
+        with pytest.raises(ValueError, match="position"):
+            load_positions(_write(tmp_path, "positions.toml", body))
+
+    def test_unknown_entry_key_raises(self, tmp_path: Path) -> None:
+        """항목의 모르는 키는 멈춘다. 오타 키는 그 값이 버려진 줄 모르게 한다."""
+        body = '[[positions]]\nticker = "QLD"\nquantity = 200\nqty = 300\n'
+
+        with pytest.raises(ValueError, match="qty"):
+            load_positions(_write(tmp_path, "positions.toml", body))
+
+    @pytest.mark.parametrize("ticker", [" QLD", "qld", "A<B", "069500.KS", "BRK.B"])
+    def test_ticker_outside_the_us_symbol_form_raises(self, tmp_path: Path, ticker: str) -> None:
+        """미국 상장 종목 코드 형식이 아니면 멈춘다.
+
+        비중은 달러 평가액으로, 종가는 미국 거래일로 집으므로 다른 시장 종목이 섞이면 조용히 틀린다.
+        """
+        body = f'[[positions]]\nticker = "{ticker}"\nquantity = 10\n'
+
+        with pytest.raises(ValueError, match="ticker"):
+            load_positions(_write(tmp_path, "positions.toml", body))
+
+    def test_tickers_this_system_uses_pass(self, tmp_path: Path) -> None:
+        """이 시스템이 다루는 티커는 형식 검사를 통과한다. 클래스 주식은 yfinance 표기(하이픈)로 적는다."""
+        tickers = ["SPY", "QQQ", "GLD", "TLT", "SSO", "QLD", "BRK-B"]
+        body = "".join(f'[[positions]]\nticker = "{ticker}"\nquantity = 1\n\n' for ticker in tickers)
+
+        positions = load_positions(_write(tmp_path, "positions.toml", body))
+
+        assert [p.ticker for p in positions] == tickers

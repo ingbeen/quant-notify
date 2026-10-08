@@ -1,16 +1,12 @@
-"""조회 실패의 원인이 그대로 올라오는지 고정한다.
+"""yfinance 조회 실패의 원인이 그대로 올라오는지와 받은 종가의 모양을 고정한다.
 
-`yf.download` 는 종목별 예외를 **삼키고** 빈 프레임을 돌려준다. 그러면 실패 알림에
-`YFRateLimitError` 인지 `YFPricesMissingError` 인지가 남지 않아, **다시 돌리면 될 일인지
-티커가 없어진 것인지** 읽는 사람이 가릴 수 없다. 실제로 2026-09-07 14:30 실행이 429 로
-실패했을 때 알림에는 그 사실이 없었고, Actions 로그를 열어야만 원인을 알 수 있었다.
-
-그래서 예외를 그대로 올리는 `Ticker.history(raise_errors=True)` 를 쓴다. 이 파일이
-그 정책을 지킨다 — 라이브러리 판이 바뀌어 다시 삼켜지면 여기서 먼저 어긋난다.
+`yf.download` 는 종목별 예외를 삼키므로 `Ticker.history(raise_errors=True)` 를 쓴다
+(`docs/research/데이터소스_실측.md` §2.4). 라이브러리 판이 바뀌어 다시 삼켜지면 여기서 먼저 어긋난다.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import pandas as pd
@@ -92,7 +88,7 @@ class TestFetchClosesCarriesTheCause:
         """라이브러리가 준 문장을 그대로 남긴다. 요약하면 재실행 판단 근거가 사라진다."""
         _install(monkeypatch, {KODEX: YFRateLimitError()})
 
-        with pytest.raises(ValueError, match="Too Many Requests"):
+        with pytest.raises(ValueError, match=re.escape(str(YFRateLimitError()))):
             fetch_closes([KODEX])
 
     def test_delisted_ticker_carries_its_own_cause(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,24 +98,16 @@ class TestFetchClosesCarriesTheCause:
         with pytest.raises(ValueError, match="YFPricesMissingError"):
             fetch_closes([KODEX])
 
-    def test_message_names_the_failed_ticker(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """어느 종목에서 실패했는지 담는다. 여러 종목을 받을 때 이것이 없으면 못 찾는다."""
-        frame = _frame([100.0], [date(2026, 9, 4)], tz="America/New_York")
-        _install(monkeypatch, {QQQ: frame, KODEX: YFRateLimitError()})
-
-        with pytest.raises(ValueError, match=r"069500\.KS"):
-            fetch_closes([QQQ, KODEX])
-
 
 class TestFetchClosesFailsWhole:
     """부분 성공을 만들지 않는다."""
 
     def test_one_failure_fails_the_whole_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """앞 종목이 멀쩡해도 뒤가 실패하면 전체가 실패한다. 반쪽 결과를 돌려주지 않는다."""
+        """앞 종목이 멀쩡해도 뒤가 실패하면 전체가 실패하고, 실패한 종목을 문구에 담는다."""
         frame = _frame([100.0], [date(2026, 9, 4)], tz="America/New_York")
         _install(monkeypatch, {QQQ: frame, KODEX: YFRateLimitError()})
 
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=r"069500\.KS"):
             fetch_closes([QQQ, KODEX])
 
     def test_stops_at_the_first_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -133,6 +121,14 @@ class TestFetchClosesFailsWhole:
             fetch_closes([KODEX, QQQ])
 
         assert calls == [KODEX]
+
+    def test_non_positive_close_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """0 이하 종가는 실재할 수 없다. 그 값으로 근접도를 내면 −100% 가 「매도선 아래」로 나간다."""
+        days = [date(2026, 9, 3), date(2026, 9, 4)]
+        _install(monkeypatch, {QQQ: _frame([566.30, 0.0], days, tz="America/New_York")})
+
+        with pytest.raises(ValueError, match=r"\[QQQ\].*0 이하"):
+            fetch_closes([QQQ])
 
     def test_empty_series_is_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """예외가 없어도 종가가 비면 실패로 돌린다. 빈 값으로 판정에 들어가지 않는다."""
@@ -154,6 +150,12 @@ class TestFetchClosesNormalPath:
 
         assert list(closes) == [KODEX]
         assert list(closes[KODEX]) == [107615.0, 108000.0]
+
+    def test_index_becomes_the_exchange_local_date(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """인덱스를 거래소 현지 날짜로 바꾼다. UTC 로 바꾼 뒤 날짜를 내면 UTC 보다 앞선 거래소는 하루 밀린다."""
+        _install(monkeypatch, {KODEX: _frame([107615.0], [date(2026, 9, 4)])})
+
+        assert list(fetch_closes([KODEX])[KODEX].index) == [date(2026, 9, 4)]
 
     def test_drops_missing_values(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """빈 값이 섞여 오면 버린다. 채우지 않는다."""

@@ -1,28 +1,17 @@
-"""실패 알림 문구.
-
-**제목과 예외 메시지만 낸다.** 「재시도하지 않습니다」 같은 안내를 붙이지 않는다 —
-재시도가 없다는 것은 이미 설계이고, 매번 읽히는 문구가 아니다.
-
-조용히 끝나는 알림의 실패도 실패 알림을 보낸다. 휴장이라 조용한 것과 오류로 조용한 것이
-구분되어야 한다.
-"""
+"""실패 알림 문구. 형식의 정본은 `docs/DESIGN.md` §4.3 「실패 알림」이다."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from notify.alerts.formatting import alert, escape_html, format_day
+from notify.alerts.formatting import alert, escape_html, format_sent_at
 from notify.utils.logger import mask_credentials
 
 
 def render(alert_name: str, error: BaseException, sent_at: datetime) -> str:
     """실패 알림 문구를 만든다.
 
-    예외 메시지를 마스킹해서 담는다. 조회 주소에 인증키가 들어가는 경우가 있고,
-    이 저장소는 실행 로그가 공개되는 곳에서 돈다.
-
-    **예외 메시지는 이스케이프한다.** 바깥에서 온 문자열이라 `<` 나 `&` 가 섞이면
-    문구 전체가 깨진다.
+    예외 메시지는 가리고(조회 주소에 인증키가 들어갈 수 있다) 이스케이프한다(바깥에서 온 문자열이다).
 
     Args:
         alert_name: 실패한 알림 이름.
@@ -34,11 +23,4 @@ def render(alert_name: str, error: BaseException, sent_at: datetime) -> str:
     """
     detail = escape_html(mask_credentials(f"{type(error).__name__}: {error}"))
 
-    return "\n".join(
-        [
-            alert(f"실패 · {alert_name}"),
-            f"{format_day(sent_at.date())} {sent_at:%H:%M}",
-            "",
-            detail,
-        ]
-    )
+    return "\n".join([alert(f"실패 · {alert_name}"), format_sent_at(sent_at), "", detail])

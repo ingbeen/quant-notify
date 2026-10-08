@@ -1,44 +1,13 @@
-"""미국 거래일을 판정한다.
-
-cron 은 요일만 알고 휴장을 모른다. 휴장일에 실행이 걸리면 알림은 조용히 끝난다 —
-보낼 것이 없는 날에 빈 알림을 내지 않는다.
-"""
+"""미국 거래일과 장 마감 시각을 판정한다. cron 은 요일만 알고 휴장을 모른다."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 
 import exchange_calendars as xcals
 
-from notify.utils.logger import get_logger
-
-logger = get_logger(__name__)
-
-# 거래소 코드
-US_CALENDAR = "XNYS"
-
-
-def is_trading_day(calendar_code: str, day: date) -> bool:
-    """그 날이 거래일인지 본다.
-
-    Args:
-        calendar_code: 거래소 코드.
-        day: 판정할 날짜.
-
-    Returns:
-        거래일이면 True.
-
-    Raises:
-        ValueError: 달력이 다루는 범위를 벗어난 날짜일 때.
-    """
-    calendar = xcals.get_calendar(calendar_code)
-
-    first = calendar.first_session.date()
-    last = calendar.last_session.date()
-    if not first <= day <= last:
-        raise ValueError(f"{calendar_code} 달력이 {day} 를 다루지 않습니다 (범위 {first} ~ {last}). " f"exchange-calendars 를 갱신하세요.")
-
-    return bool(calendar.is_session(day.isoformat()))
+# 뉴욕증권거래소
+_US_CALENDAR = "XNYS"
 
 
 def is_us_trading_day(day: date) -> bool:
@@ -49,5 +18,23 @@ def is_us_trading_day(day: date) -> bool:
 
     Returns:
         거래일이면 True.
+
+    Raises:
+        ValueError: 달력이 다루는 범위(실행 시점 기준 20년 전 ~ 1년 뒤) 밖일 때.
     """
-    return is_trading_day(US_CALENDAR, day)
+    return bool(xcals.get_calendar(_US_CALENDAR).is_session(day.isoformat()))
+
+
+def us_session_close(day: date) -> datetime:
+    """그 거래일의 미국장 마감 시각을 낸다. 조기 마감을 반영한다.
+
+    Args:
+        day: 미국 거래일.
+
+    Returns:
+        마감 시각. UTC 시간대가 붙어 있다.
+
+    Raises:
+        ValueError: 거래일이 아닐 때.
+    """
+    return xcals.get_calendar(_US_CALENDAR).session_close(day.isoformat()).to_pydatetime()

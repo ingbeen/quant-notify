@@ -1,10 +1,6 @@
 """자격증명 마스킹을 고정한다.
 
-**자격증명을 URL 경로에 넣는 API 가 둘이고 형태가 다르다.** ECOS 인증키는 영숫자 한 조각이고,
-텔레그램 봇 토큰은 `:` 와 `-` 가 섞인다. 영숫자만 잡는 패턴으로는 토큰이 그대로 새므로
-둘을 따로 잡는다.
-
-주소를 그대로 로그에 남기면 자격증명이 박히고, 이 저장소는 실행 로그가 공개되는 곳에서 돈다.
+ECOS 인증키와 텔레그램 봇 토큰은 형태가 달라 패턴도 둘이다 (`docs/DESIGN.md` §3.4).
 """
 
 from __future__ import annotations
@@ -103,11 +99,10 @@ class TestMaskTelegramToken:
         assert SAMPLE_TOKEN not in mask_credentials(f"chat_id=123456789 {SAMPLE_TOKEN}")
 
     def test_words_containing_bot_are_untouched(self) -> None:
-        """`bot` 이 든 경로·파일명을 건드리지 않는다.
+        """`bot` 이 든 경로 · 파일명을 건드리지 않는다.
 
-        전에 `/bot` 접두사로 잡다가 **저장소 이름과 트레이스백을 지웠다** —
-        `.../repos/owner/bot-alerts/...` 는 실행 이력 조회가 실패했을 때
-        유일하게 쓸모 있는 단서이고, `bot.py",` 는 닫는 따옴표까지 먹혔다.
+        실행 이력 조회가 실패했을 때의 저장소 이름(`.../repos/owner/bot-alerts/...`)과
+        트레이스백의 파일명은 원인을 찾는 단서다.
         """
         for text in (
             "https://example.com/robots.txt",
@@ -134,12 +129,7 @@ class TestMaskTelegramToken:
 
 
 class TestSendFailureCarriesNoToken:
-    """발송이 실패했을 때 올라가는 예외.
-
-    이 예외는 잡히지 않고 트레이스백으로 나간다 (`docs/DESIGN.md` §7.2 — 텔레그램이
-    죽으면 Actions 실패 메일이 맡는다). **그래서 마스킹이 로거가 아니라 발송 모듈
-    «안»에서 되어야** 트레이스백까지 덮인다.
-    """
+    """발송이 실패했을 때 올라가는 예외. 잡히지 않고 트레이스백으로 나가므로 발송 모듈 안에서 가린다."""
 
     def test_raised_message_has_no_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """올라가는 메시지에 토큰이 없다."""
@@ -173,6 +163,17 @@ class TestSendFailureCarriesNoToken:
 
         assert caught.value.__cause__ is None
         assert caught.value.__context__ is None or caught.value.__suppress_context__
+
+    def test_quiet_send_swallows_the_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """실패 알림용 발송은 실패해도 예외를 올리지 않는다. 실패를 알리다 다시 실패하지 않게 한다."""
+
+        def _unauthorized(url: str, **kwargs: object) -> None:
+            del kwargs
+            raise requests.HTTPError(f"401 Client Error: Unauthorized for url: {url}")
+
+        monkeypatch.setattr(telegram.requests, "post", _unauthorized)
+
+        telegram.send_without_raising(SAMPLE_TOKEN, "12345", "본문")
 
 
 class TestLoggerMasking:

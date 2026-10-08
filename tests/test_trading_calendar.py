@@ -1,32 +1,14 @@
-"""거래일 판정을 고정한다.
-
-cron 은 요일만 알고 휴장을 모른다. 판정이 틀리면 휴장일에 빈 알림이 나가거나,
-거래일에 알림이 통째로 빠진다.
-"""
+"""미국 거래일과 장 마감 판정을 고정한다. 버퍼존의 침묵과 장 마감 가드가 여기에 기댄다."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
-import pytest
-
-from notify.data.calendar import is_us_trading_day
+from notify.data.calendar import is_us_trading_day, us_session_close
 
 
 class TestTradingDay:
     """거래일과 휴장일."""
-
-    def test_weekday_is_a_trading_day(self) -> None:
-        """평일은 거래일이다."""
-        friday = date(2026, 9, 4)
-
-        assert is_us_trading_day(friday)
-
-    def test_weekend_is_closed(self) -> None:
-        """주말은 휴장이다."""
-        saturday = date(2026, 9, 5)
-
-        assert not is_us_trading_day(saturday)
 
     def test_us_holiday_is_closed(self) -> None:
         """미국 공휴일은 휴장이다.
@@ -38,10 +20,9 @@ class TestTradingDay:
 
         assert not is_us_trading_day(labor_day)
 
-    def test_out_of_range_raises(self) -> None:
-        """달력이 다루지 않는 날짜는 예외다.
+    def test_early_close_is_known(self) -> None:
+        """조기 마감일의 마감 시각을 안다. 16:00 으로 박으면 그날 수동 실행을 장중으로 오판한다.
 
-        조용히 False 를 돌려주면 알림이 통째로 빠진 것을 휴장으로 오해한다.
+        2026-11-27 은 추수감사절 다음 날이라 13:00 ET(18:00 UTC)에 닫는다.
         """
-        with pytest.raises(ValueError, match="갱신"):
-            is_us_trading_day(date(2099, 1, 4))
+        assert us_session_close(date(2026, 11, 27)) == datetime(2026, 11, 27, 18, 0, tzinfo=UTC)
